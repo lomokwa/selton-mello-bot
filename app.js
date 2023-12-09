@@ -1,9 +1,16 @@
 import 'dotenv/config';
-import { Client, GatewayIntentBits, Events } from 'discord.js';
+import { Client, GatewayIntentBits, Events, ActivityType } from 'discord.js';
 
 const token = process.env.DISCORD_TOKEN;
 const bot = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent, GatewayIntentBits.GuildMembers, GatewayIntentBits.GuildPresences],
+  intents: [
+    GatewayIntentBits.Guilds, 
+    GatewayIntentBits.GuildMessages, 
+    GatewayIntentBits.MessageContent, 
+    GatewayIntentBits.GuildMembers, 
+    GatewayIntentBits.GuildPresences
+  ],
+  partials: ["GuildMember"],
 });
 
 const triggerWords = {
@@ -24,9 +31,6 @@ bot.on("messageCreate", (message) => {
   const contentLowercase = message.content.toLowerCase();
   for(const word of Object.keys(triggerWords)) {
     if(contentLowercase.includes(word.toLowerCase())) {
-      if (contentLowercase.includes('salve o selton mello')) {
-      
-      }
       message.reply(triggerWords[word]);
       break;
     }
@@ -37,14 +41,26 @@ bot.on("messageCreate", (message) => {
 //362414375652294657
 // Sends a message when a new member joins the server
 bot.on("guildMemberAdd", member => {
-  member.guild.channels.get("531250909582327830").send(`${member.user.username}, SMT!`)
-  console.log(`${member.user.username} joined the server`)
+  member.guild.channels.fetch("531250909582327830").then(channel => {
+    if (channel) {
+      console.log(`${member.user.username} joined the server`)
+      channel.send(`SMT <@${member.user.id}>!`);
+    } else {
+      console.error("Channel with id 531250909582327830 does not exist");
+    }
+  })
 })
 
 // Sends a message when a member leaves the server
 bot.on("guildMemberRemove", member => {
-  member.guild.channels.get("531250909582327830").send(`${member.user.username} SEU BOSTA SEU PORRA SEU CARALHO DE MERDA SEU FDP DO KRL`)
-  console.log(`${member.user.username} left the server`)
+  member.guild.channels.fetch("531250909582327830").then(channel => {
+    if (channel) {
+      console.log(`${member.user.username} left the server`)
+      channel.send(`<@${member.user.id}> SEU BOSTA SEU PORRA SEU CARALHO DE MERDA SEU FDP DO KRL`)
+    } else {
+      console.error("Channel with id 531250909582327830 does not exist");
+    }
+  })
 })
 
 bot.login(token);
