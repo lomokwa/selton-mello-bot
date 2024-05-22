@@ -1,10 +1,10 @@
 import 'dotenv/config';
 import { Client, GatewayIntentBits, Events, ActivityType } from 'discord.js';
-import { updateBotStatusMessage } from './utils/getRemainingTIme';
+import { updateBotStatusMessage } from './utils/getRemainingTIme.js';
 
 const token = process.env.DISCORD_TOKEN;
 
-const bot = new Client({
+export const bot = new Client({
   intents: [
     GatewayIntentBits.Guilds, 
     GatewayIntentBits.GuildMessages, 
@@ -28,7 +28,7 @@ bot.once(Events.ClientReady, (readyClient) => {
   // Update the bot status message immediately and then every 30 minutes
   const channelId = '1242686217137553561';
   updateBotStatusMessage(channelId);
-  setInterval(() => updateBotStatusMessage(channelId), 30 * 60 * 1000);
+  setInterval(() => updateBotStatusMessage(channelId), 1000);
 });
 
 // Checks for trigger word in message and replies with the corresponding value
