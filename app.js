@@ -1,7 +1,9 @@
 import 'dotenv/config';
 import { Client, GatewayIntentBits, Events, ActivityType } from 'discord.js';
+import { updateBotStatusMessage } from './utils/getRemainingTIme';
 
 const token = process.env.DISCORD_TOKEN;
+
 const bot = new Client({
   intents: [
     GatewayIntentBits.Guilds, 
@@ -22,6 +24,11 @@ const triggerWords = {
 
 bot.once(Events.ClientReady, (readyClient) => {
   console.log(`Ready! Logged in as ${readyClient.user.tag}`);
+
+  // Update the bot status message immediately and then every 30 minutes
+  const channelId = '1242686217137553561';
+  updateBotStatusMessage(channelId);
+  setInterval(() => updateBotStatusMessage(channelId), 30 * 60 * 1000);
 });
 
 // Checks for trigger word in message and replies with the corresponding value
@@ -36,7 +43,6 @@ bot.on("messageCreate", (message) => {
     }
   }  
 });
-
 
 //362414375652294657
 // Sends a message when a new member joins the server
@@ -62,5 +68,8 @@ bot.on("guildMemberRemove", member => {
     }
   })
 })
+
+// Update April Transcription Status
+
 
 bot.login(token);
