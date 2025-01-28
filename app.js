@@ -3,6 +3,7 @@ import { Client, GatewayIntentBits, Events, ActivityType } from 'discord.js';
 import { updateBotStatusMessage } from './utils/getRemainingTIme.js';
 
 const token = process.env.DISCORD_TOKEN;
+const channelId = process.env.CHANNEL_ID;
 
 export const bot = new Client({
   intents: [
@@ -26,7 +27,6 @@ bot.once(Events.ClientReady, (readyClient) => {
   console.log(`Ready! Logged in as ${readyClient.user.tag}`);
 
   // Update the bot status message immediately and then every 30 minutes
-  const channelId = '1242686217137553561';
   updateBotStatusMessage(channelId);
   setInterval(() => updateBotStatusMessage(channelId), 1000);
 });
@@ -47,24 +47,24 @@ bot.on("messageCreate", (message) => {
 //362414375652294657
 // Sends a message when a new member joins the server
 bot.on("guildMemberAdd", member => {
-  member.guild.channels.fetch("531250909582327830").then(channel => {
+  member.guild.channels.fetch(`${channelId}`).then(channel => {
     if (channel) {
       console.log(`${member.user.username} joined the server`)
       channel.send(`SMT <@${member.user.id}>!`);
     } else {
-      console.error("Channel with id 531250909582327830 does not exist");
+      console.error(`Channel with id ${channelId} does not exist`);
     }
   })
 })
 
 // Sends a message when a member leaves the server
 bot.on("guildMemberRemove", member => {
-  member.guild.channels.fetch("531250909582327830").then(channel => {
+  member.guild.channels.fetch(`${channelId}`).then(channel => {
     if (channel) {
       console.log(`${member.user.username} left the server`)
-      channel.send(`<@${member.user.id}> SEU BOSTA SEU PORRA SEU CARALHO DE MERDA SEU FDP DO KRL`)
+      channel.send(`<@${member.user.id}> tchau`)
     } else {
-      console.error("Channel with id 531250909582327830 does not exist");
+      console.error(`Channel with id ${channelId} does not exist`);
     }
   })
 })
