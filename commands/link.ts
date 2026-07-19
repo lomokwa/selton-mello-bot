@@ -5,6 +5,7 @@ import { Command } from "./types.js";
 
 const startFailureMessages: Record<Extract<ReturnType<typeof startAccountLink>, { ok: false }>["reason"], string> = {
   "invalid-username": "That doesn't look like a valid Minecraft username (3-16 letters, numbers, or underscores).",
+  "already-linked": "You're already linked to a Minecraft account — run `/link unlink` first if you want to link a different one.",
   "already-linked-elsewhere": "That Minecraft account is already linked to a different Discord account.",
   "whisper-failed":
     "Could not reach the Minecraft server right now — make sure the player is online and try again in a moment.",

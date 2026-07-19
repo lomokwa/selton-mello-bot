@@ -28,7 +28,7 @@
  */
 import { randomInt } from 'node:crypto';
 import { sendCommand } from './consoleStream.js';
-import { getDiscordUserIdForMinecraftUsername, linkAccount } from '../db/accountLinks.js';
+import { getDiscordUserIdForMinecraftUsername, getLinkedMinecraftUsername, linkAccount } from '../db/accountLinks.js';
 
 const CODE_LENGTH = 6;
 const CODE_TTL_MS = 5 * 60 * 1000; // 5 minutes
@@ -113,16 +113,23 @@ const pendingLinks = new Map<string, PendingLink>();
 
 export type StartLinkResult =
   | { ok: true }
-  | { ok: false; reason: 'invalid-username' | 'already-linked-elsewhere' | 'whisper-failed' };
+  | { ok: false; reason: 'invalid-username' | 'already-linked' | 'already-linked-elsewhere' | 'whisper-failed' };
 
 /**
  * Kicks off account linking from Discord (`/link start <username>`):
- * validates the username, checks it isn't already claimed by a different
- * Discord account, then whispers a one-time code to the player in-game.
+ * validates the username, rejects if the requesting Discord user is already
+ * linked to *anything* (same or different username — they must `/link
+ * unlink` first, whether they're re-verifying or switching accounts) or if
+ * the target username is already claimed by a different Discord account,
+ * then whispers a one-time code to the player in-game.
  */
 export function startAccountLink(discordUserId: string, minecraftUsername: string): StartLinkResult {
   if (!isValidMinecraftUsername(minecraftUsername)) {
     return { ok: false, reason: 'invalid-username' };
+  }
+
+  if (getLinkedMinecraftUsername(discordUserId)) {
+    return { ok: false, reason: 'already-linked' };
   }
 
   const existingOwner = getDiscordUserIdForMinecraftUsername(minecraftUsername);
