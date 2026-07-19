@@ -1,7 +1,8 @@
 import 'dotenv/config';
-import { Client, GatewayIntentBits, Events, Guild } from 'discord.js';
-import { resolveIntroChannelId } from './db/guildSettings.js';
+import { Client, GatewayIntentBits, Events, Guild, Webhook, Collection } from 'discord.js';
+import { resolveIntroChannelId, getGuildsWithBotChannel } from './db/guildSettings.js';
 import { commandsByName } from './commands/index.js';
+import { startConsoleStream, ChatMessage } from './mcManager/consoleStream.js';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -15,6 +16,7 @@ export const bot = new Client({
 
 bot.once(Events.ClientReady, (readyClient: Client<true>) => {
   console.log(`Ready! Logged in as ${readyClient.user.tag}`);
+  startConsoleStream(broadcastMinecraftChatMessage);
 });
 
 const introMessage =
@@ -72,6 +74,115 @@ bot.login(token).catch((error) => {
   console.error('Failed to log in to Discord:', error);
   process.exitCode = 1;
 });
+
+// Escapes Discord markdown and mention triggers in untrusted chat message text
+// (Minecraft player messages) so players can't format text or ping @everyone/@here.
+function sanitizeMessageContent(text: string): string {
+  return text
+    .replace(/[\\*_~`|>]/g, '\\$&')
+    .replace(/@(everyone|here)/g, '@\u200b$1');
+}
+
+// Webhook usernames aren't markdown-rendered, so no escaping is needed there —
+// just enforce Discord's constraints (1-80 chars, no "discord" substring, no
+// leading/trailing whitespace) so mc-manager can't send an invalid username.
+function sanitizeWebhookUsername(username: string): string {
+  const cleaned = username.replace(/discord/gi, 'disc\u200bord').trim();
+  return cleaned.slice(0, 80) || 'Unknown Player';
+}
+
+const WEBHOOK_NAME = 'Minecraft Chat';
+
+// Caches one webhook per channel so we don't re-create/re-fetch it for every chat message.
+const chatWebhooks = new Map<string, Webhook>();
+
+// Remembers channels where webhook access recently failed (e.g. missing permissions),
+// so we fall back to plain messages instead of retrying + logging on every chat line.
+const webhookRetryAfter = new Map<string, number>();
+const WEBHOOK_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
+
+// Finds (or creates) the webhook used to post Minecraft chat messages with a
+// per-player display name and avatar, rather than a generic bot message.
+async function getOrCreateChatWebhook(channel: unknown): Promise<Webhook | null> {
+  if (!channel || typeof channel !== 'object' || !('id' in channel)) return null;
+  const channelId = (channel as { id: string }).id;
+
+  const cached = chatWebhooks.get(channelId);
+  if (cached) return cached;
+
+  const retryAfter = webhookRetryAfter.get(channelId);
+  if (retryAfter && Date.now() < retryAfter) return null;
+
+  if (!('fetchWebhooks' in channel) || !('createWebhook' in channel)) {
+    console.error(`Channel ${channelId} does not support webhooks`);
+    webhookRetryAfter.set(channelId, Date.now() + WEBHOOK_RETRY_COOLDOWN_MS);
+    return null;
+  }
+
+  const webhookChannel = channel as {
+    fetchWebhooks: () => Promise<Collection<string, Webhook>>;
+    createWebhook: (options: { name: string; reason?: string }) => Promise<Webhook>;
+  };
+
+  try {
+    const existingWebhooks = await webhookChannel.fetchWebhooks();
+    const existing = existingWebhooks.find(
+      (webhook) => webhook.name === WEBHOOK_NAME && webhook.owner?.id === bot.user?.id,
+    );
+
+    const webhook =
+      existing ??
+      (await webhookChannel.createWebhook({
+        name: WEBHOOK_NAME,
+        reason: 'Used to relay Minecraft chat messages with per-player avatars',
+      }));
+
+    chatWebhooks.set(channelId, webhook);
+    webhookRetryAfter.delete(channelId);
+    return webhook;
+  } catch (error) {
+    console.error(
+      `Missing "Manage Webhooks" permission in channel ${channelId} — falling back to plain messages for ${Math.round(WEBHOOK_RETRY_COOLDOWN_MS / 60000)} min:`,
+      error instanceof Error ? error.message : error,
+    );
+    webhookRetryAfter.set(channelId, Date.now() + WEBHOOK_RETRY_COOLDOWN_MS);
+    return null;
+  }
+}
+
+// Returns a rendered player-head avatar for the given Minecraft username.
+function getPlayerHeadUrl(username: string): string {
+  return `https://mc-heads.net/avatar/${encodeURIComponent(username)}/100`;
+}
+
+async function broadcastMinecraftChatMessage(chat: ChatMessage): Promise<void> {
+  const username = sanitizeWebhookUsername(chat.username);
+  const content = sanitizeMessageContent(chat.message);
+
+  for (const { guildId, botChannelId } of getGuildsWithBotChannel()) {
+    try {
+      const guild = await bot.guilds.fetch(guildId);
+      const channel = await guild.channels.fetch(botChannelId);
+      if (!channel || !channel.isTextBased() || !('send' in channel)) continue;
+
+      const webhook = await getOrCreateChatWebhook(channel);
+      if (webhook) {
+        await webhook.send({
+          content,
+          username,
+          avatarURL: getPlayerHeadUrl(chat.username),
+        });
+      } else {
+        // Fallback if the bot lacks Manage Webhooks permission in this channel.
+        // Unlike the webhook path, this is a regular message where markdown renders,
+        // so the username needs escaping here too.
+        await channel.send(`**${sanitizeMessageContent(username)}**: ${content}`);
+      }
+    } catch (error) {
+      console.error(`Failed to forward Minecraft chat message to guild ${guildId}:`, error);
+    }
+  }
+}
 
 process.on('unhandledRejection', (error) => {
   console.error('Unhandled promise rejection:', error);
