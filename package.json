@@ -29,6 +29,8 @@
     "start": "node dist/app.js",
     "deploy-commands": "tsx deploy-commands.ts",
     "deploy-commands:dev": "dotenv -e .env.dev -- tsx deploy-commands.ts",
+    "invite-url": "tsx generate-invite-url.ts",
+    "invite-url:dev": "dotenv -e .env.dev -- tsx generate-invite-url.ts",
     "test": "dotenv -e .env.test -- node --import tsx --test test/**/*.test.ts"
   },
   "dependencies": {
