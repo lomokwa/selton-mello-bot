@@ -24,7 +24,7 @@ bot.once(Events.ClientReady, (readyClient: Client<true>) => {
 });
 
 const introMessage =
-  "👋 Thanks for adding me! Use `/setbotchannel` to pick a channel for join/leave messages and Minecraft chat streaming.";
+  `Salve o Selton Mello \n\n Use "/help para ver todos os comandos disponiveis`;
 
 // Posts a one-time intro message explaining the bot when it joins a new server
 bot.on(Events.GuildCreate, async (guild: Guild) => {

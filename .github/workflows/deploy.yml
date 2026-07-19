@@ -1,0 +1,42 @@
+name: Deploy
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    name: Type-check & build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+
+  deploy:
+    name: Deploy to homelab
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install cloudflared
+        run: |
+          curl -fsSL https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 -o cloudflared
+          chmod +x cloudflared
+          sudo mv cloudflared /usr/local/bin/
+
+      - name: Deploy via SSH
+        env:
+          SSH_KEY: ${{ secrets.HOMELAB_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/key
+          chmod 600 ~/.ssh/key
+          ssh -o StrictHostKeyChecking=no \
+              -o ProxyCommand="cloudflared access ssh --hostname ${{ secrets.HOMELAB_HOST }}" \
+              -i ~/.ssh/key \
+              ${{ secrets.HOMELAB_USER }}@${{ secrets.HOMELAB_HOST }} \
+              "cd /home/lomokwa/homelab/selton-mello-bot && git pull origin main && npm ci && npm run build && sudo systemctl restart selton-mello-bot"
