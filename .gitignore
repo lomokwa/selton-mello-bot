@@ -1,5 +1,8 @@
 .env
 node_modules
+dist
 remainingTime.json
 statusMessageId.json
+bot.sqlite3
+bot.sqlite3-*
 "D:\dev\projects\selton-mello-bot\statusMessageId.json"
