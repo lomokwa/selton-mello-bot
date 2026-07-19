@@ -50,9 +50,25 @@ function discordLabelParts(username: string, nameColor: string): Record<string, 
  * pass undefined to fall back to a neutral white for users with no colored role.
  */
 export function broadcastDiscordMessageToMinecraft(username: string, message: string, nameColor?: string): void {
+  const commands = buildBroadcastCommands(username, message, nameColor);
+  if (!commands) return;
+
+  for (const command of commands) {
+    sendCommand(command);
+  }
+}
+
+/**
+ * Builds the 3 console commands that make up a Discord->Minecraft broadcast
+ * (see the module-level doc comment), without sending them anywhere. Split
+ * out from broadcastDiscordMessageToMinecraft so the exact command strings
+ * can be unit tested independently of the live WebSocket connection.
+ * Returns null if the sanitized username or message end up empty.
+ */
+export function buildBroadcastCommands(username: string, message: string, nameColor?: string): string[] | null {
   const name = sanitizeText(username);
   const msg = sanitizeText(message).slice(0, MAX_MESSAGE_LENGTH);
-  if (!name || !msg) return;
+  if (!name || !msg) return null;
 
   const color = nameColor && /^#[0-9a-fA-F]{6}$/.test(nameColor) ? nameColor : '#FFFFFF';
 
@@ -64,7 +80,9 @@ export function broadcastDiscordMessageToMinecraft(username: string, message: st
     { text: msg, color: 'white' },
   ];
 
-  sendCommand(`tellraw @a ${JSON.stringify(component)}`);
-  sendCommand(`data modify storage ${BROADCAST_STORAGE} msg set value ${snbt(record)}`);
-  sendCommand(`data get storage ${BROADCAST_STORAGE}`);
+  return [
+    `tellraw @a ${JSON.stringify(component)}`,
+    `data modify storage ${BROADCAST_STORAGE} msg set value ${snbt(record)}`,
+    `data get storage ${BROADCAST_STORAGE}`,
+  ];
 }

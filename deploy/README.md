@@ -8,7 +8,15 @@ One-time setup on the homelab host before the `Deploy` workflow will work:
    cd /home/lomokwa/homelab/selton-mello-bot
    npm ci
    npm run build
+   mkdir -p data
    ```
+   `data/` holds the bot's SQLite settings db and is gitignored, so it won't
+   exist on a fresh clone. The systemd unit below sandboxes the process with
+   `ReadWritePaths=.../data`, which requires that directory to already exist
+   on disk *before* the service starts — otherwise it crash-loops with
+   `226/NAMESPACE`. The deploy workflow also runs `mkdir -p data` on every
+   deploy so this can't regress if the directory is ever removed.
+
    Add a `.env` there with `DISCORD_TOKEN`, `CLIENT_ID`, `MC_MANAGER_API_URL`,
    `MC_MANAGER_USERNAME`, `MC_MANAGER_PASSWORD` (no `GUILD_ID` — global slash
    command registration is what you want in production).

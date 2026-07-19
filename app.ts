@@ -4,6 +4,7 @@ import { resolveIntroChannelId, getGuildsWithBotChannel, getBotChannelId } from 
 import { commandsByName } from './commands/index.js';
 import { startConsoleStream, ChatMessage } from './mcManager/consoleStream.js';
 import { broadcastDiscordMessageToMinecraft } from './mcManager/discordBroadcast.js';
+import { sanitizeMessageContent, sanitizeWebhookUsername, getPlayerHeadUrl } from './sanitize.js';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -106,22 +107,6 @@ bot.login(token).catch((error) => {
   process.exitCode = 1;
 });
 
-// Escapes Discord markdown and mention triggers in untrusted chat message text
-// (Minecraft player messages) so players can't format text or ping @everyone/@here.
-function sanitizeMessageContent(text: string): string {
-  return text
-    .replace(/[\\*_~`|>]/g, '\\$&')
-    .replace(/@(everyone|here)/g, '@\u200b$1');
-}
-
-// Webhook usernames aren't markdown-rendered, so no escaping is needed there —
-// just enforce Discord's constraints (1-80 chars, no "discord" substring, no
-// leading/trailing whitespace) so mc-manager can't send an invalid username.
-function sanitizeWebhookUsername(username: string): string {
-  const cleaned = username.replace(/discord/gi, 'disc\u200bord').trim();
-  return cleaned.slice(0, 80) || 'Unknown Player';
-}
-
 const WEBHOOK_NAME = 'Minecraft Chat';
 
 // Caches one webhook per channel so we don't re-create/re-fetch it for every chat message.
@@ -179,11 +164,6 @@ async function getOrCreateChatWebhook(channel: unknown): Promise<Webhook | null>
     webhookRetryAfter.set(channelId, Date.now() + WEBHOOK_RETRY_COOLDOWN_MS);
     return null;
   }
-}
-
-// Returns a rendered player-head avatar for the given Minecraft username.
-function getPlayerHeadUrl(username: string): string {
-  return `https://mc-heads.net/avatar/${encodeURIComponent(username)}/100`;
 }
 
 async function broadcastMinecraftChatMessage(chat: ChatMessage): Promise<void> {

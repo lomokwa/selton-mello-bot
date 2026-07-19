@@ -33,7 +33,7 @@ const LOG_TIMESTAMP_PATTERN = /^\[(\d{2}):(\d{2}):(\d{2})\]/;
 // UTC rather than using Date's local-time constructor.
 const CLOCK_SKEW_TOLERANCE_MS = 2_000;
 
-function isReplayedLine(line: string, connectedAt: number): boolean {
+export function isReplayedLine(line: string, connectedAt: number): boolean {
   const match = LOG_TIMESTAMP_PATTERN.exec(line);
   if (!match) return false; // no timestamp to compare against — assume it's live
 
@@ -58,7 +58,7 @@ function isReplayedLine(line: string, connectedAt: number): boolean {
   return lineTimeMs <= connectedAt - CLOCK_SKEW_TOLERANCE_MS;
 }
 
-function parseChatLine(line: string): ChatMessage | null {
+export function parseChatLine(line: string): ChatMessage | null {
   const match = CHAT_LINE_PATTERN.exec(line);
   if (!match) {
     return null;

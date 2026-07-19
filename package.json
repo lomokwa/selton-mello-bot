@@ -25,11 +25,11 @@
   "contributors": [],
   "scripts": {
     "dev": "dotenv -e .env.dev -- tsx watch app.ts",
-    "build": "tsc",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/app.js",
     "deploy-commands": "tsx deploy-commands.ts",
     "deploy-commands:dev": "dotenv -e .env.dev -- tsx deploy-commands.ts",
-    "test": ""
+    "test": "dotenv -e .env.test -- node --import tsx --test test/**/*.test.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.11.1",
