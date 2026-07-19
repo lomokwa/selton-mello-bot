@@ -22,6 +22,8 @@ const introMessage =
 
 // Posts a one-time intro message explaining the bot when it joins a new server
 bot.on(Events.GuildCreate, async (guild: Guild) => {
+  console.log(`Joined new guild: ${guild.name} (${guild.id})`);
+
   try {
     const introChannelId = await resolveIntroChannelId(guild);
     if (!introChannelId) {
@@ -32,6 +34,7 @@ bot.on(Events.GuildCreate, async (guild: Guild) => {
     const channel = await guild.channels.fetch(introChannelId);
     if (channel && channel.isTextBased() && 'send' in channel) {
       await channel.send(introMessage);
+      console.log(`Posted intro message in channel ${introChannelId} for guild ${guild.name} (${guild.id})`);
     }
   } catch (error) {
     console.error(`Failed to post intro message for guild ${guild.name} (${guild.id}):`, error);
@@ -42,14 +45,19 @@ bot.on(Events.GuildCreate, async (guild: Guild) => {
 bot.on(Events.InteractionCreate, async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
+  const guildLabel = interaction.guild ? `${interaction.guild.name} (${interaction.guildId})` : 'DM';
+  console.log(`/${interaction.commandName} invoked by ${interaction.user.tag} in ${guildLabel}`);
+
   const command = commandsByName.get(interaction.commandName);
   if (!command) {
     console.error(`No command matching ${interaction.commandName} was found.`);
     return;
   }
 
+  const startTime = Date.now();
   try {
     await command.execute(interaction);
+    console.log(`/${interaction.commandName} completed in ${Date.now() - startTime}ms`);
   } catch (error) {
     console.error(`Error executing command ${interaction.commandName}:`, error);
     if (interaction.replied || interaction.deferred) {

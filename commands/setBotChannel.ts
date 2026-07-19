@@ -23,6 +23,7 @@ const setBotChannelCommand: Command = {
 
     const channel = interaction.options.getChannel("channel", true);
     setBotChannelId(interaction.guildId, channel.id);
+    console.log(`Bot channel set to #${channel.name} (${channel.id}) for guild ${interaction.guildId} by ${interaction.user.tag}`);
 
     await interaction.reply({ content: `Bot messages (join/leave, Minecraft chat) will now be sent in <#${channel.id}>.` });
   },
