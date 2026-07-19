@@ -1,8 +1,9 @@
 import 'dotenv/config';
-import { Client, GatewayIntentBits, Events, Guild, Webhook, Collection } from 'discord.js';
-import { resolveIntroChannelId, getGuildsWithBotChannel } from './db/guildSettings.js';
+import { Client, GatewayIntentBits, Events, Guild, Webhook, Collection, Message } from 'discord.js';
+import { resolveIntroChannelId, getGuildsWithBotChannel, getBotChannelId } from './db/guildSettings.js';
 import { commandsByName } from './commands/index.js';
 import { startConsoleStream, ChatMessage } from './mcManager/consoleStream.js';
+import { broadcastDiscordMessageToMinecraft } from './mcManager/discordBroadcast.js';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -11,7 +12,10 @@ if (!token) {
 }
 
 export const bot = new Client({
-  intents: [GatewayIntentBits.Guilds],
+  // MessageContent is a privileged intent — enable it for this bot in the
+  // Discord Developer Portal (Bot > Privileged Gateway Intents) or message
+  // text will always arrive empty.
+  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
 });
 
 bot.once(Events.ClientReady, (readyClient: Client<true>) => {
@@ -67,6 +71,33 @@ bot.on(Events.InteractionCreate, async (interaction) => {
     } else {
       await interaction.reply({ content: 'There was an error executing this command.', ephemeral: true });
     }
+  }
+});
+
+// Relays chat messages sent in a guild's configured bot channel into the
+// Minecraft server (the reverse direction of broadcastMinecraftChatMessage).
+bot.on(Events.MessageCreate, async (message: Message) => {
+  if (!message.guildId || !message.inGuild()) return;
+  // Ignore bots and webhooks — critically, this also ignores our own
+  // "Minecraft Chat" webhook, so relayed Minecraft chat can't loop back.
+  if (message.author.bot || message.webhookId) return;
+  if (!message.content.trim()) return;
+
+  const botChannelId = getBotChannelId(message.guildId);
+  if (message.channelId !== botChannelId) return;
+
+  const member = message.member;
+  const displayName = member?.displayName ?? message.author.username;
+  // displayColor is 0 when the member has no colored role (or only @everyone) —
+  // treat that as "no color" so the broadcast falls back to a neutral white
+  // instead of literally coloring the name black.
+  const nameColor = member && member.displayColor !== 0 ? member.displayHexColor : undefined;
+
+  console.log(`Relaying Discord message from ${message.author.tag} to Minecraft: ${message.content}`);
+  try {
+    broadcastDiscordMessageToMinecraft(displayName, message.content, nameColor);
+  } catch (error) {
+    console.error('Failed to relay Discord message to Minecraft:', error);
   }
 });
 

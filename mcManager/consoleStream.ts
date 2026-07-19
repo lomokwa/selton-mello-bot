@@ -145,3 +145,18 @@ export function stopConsoleStream(): void {
   currentSocket?.close();
   currentSocket = null;
 }
+
+/**
+ * Sends a raw console command over the same WebSocket used for the log
+ * stream — mc-manager-server relays any text a client sends straight to the
+ * Minecraft server's stdin. Returns false (and logs a warning) if there's no
+ * live connection to send over; commands are best-effort, not queued.
+ */
+export function sendCommand(command: string): boolean {
+  if (!currentSocket || currentSocket.readyState !== WebSocket.OPEN) {
+    console.warn('mc-manager: cannot send command, console stream is not connected:', command);
+    return false;
+  }
+  currentSocket.send(command);
+  return true;
+}
