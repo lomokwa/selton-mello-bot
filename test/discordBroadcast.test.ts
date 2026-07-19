@@ -11,12 +11,12 @@ describe('buildBroadcastCommands', () => {
     assert.equal(commands![2], 'data get storage broadcast:log');
   });
 
-  test('includes the [Discord] tag, username, colors, and message in the tellraw JSON', () => {
+  test('includes the 🎮 tag, username, colors, and message in the tellraw JSON', () => {
     const commands = buildBroadcastCommands('lomokwa', 'hello there', '#FF0000');
     const json = commands![0].slice('tellraw @a '.length);
     const component = JSON.parse(json);
     const asText = JSON.stringify(component);
-    assert.ok(asText.includes('Discord'));
+    assert.ok(asText.includes('🎮'));
     assert.ok(asText.includes('#5865F2')); // fixed Discord-brand color for the tag
     assert.ok(asText.includes('lomokwa'));
     assert.ok(asText.includes('#FF0000')); // sender's role color
@@ -35,27 +35,27 @@ describe('buildBroadcastCommands', () => {
     assert.match(JSON.stringify(component), /"#FFFFFF"/);
   });
 
-  test('the data-modify record matches "[Discord] <name>: <message>"', () => {
+  test('the data-modify record matches "🎮 <name>: <message>"', () => {
     const commands = buildBroadcastCommands('lomokwa', 'hello there');
-    assert.equal(commands![1], 'data modify storage broadcast:log msg set value "[Discord] lomokwa: hello there"');
+    assert.equal(commands![1], 'data modify storage broadcast:log msg set value "🎮 lomokwa: hello there"');
   });
 
   test('escapes quotes and backslashes in the SNBT string literal', () => {
     const commands = buildBroadcastCommands('lomokwa', 'she said "hi" \\o/');
     assert.equal(
       commands![1],
-      'data modify storage broadcast:log msg set value "[Discord] lomokwa: she said \\"hi\\" \\\\o/"',
+      'data modify storage broadcast:log msg set value "🎮 lomokwa: she said \\"hi\\" \\\\o/"',
     );
   });
 
   test('collapses newlines so a message cannot inject extra console commands', () => {
     const commands = buildBroadcastCommands('lomokwa', 'line one\nline two\r\nline three');
-    assert.equal(commands![1], 'data modify storage broadcast:log msg set value "[Discord] lomokwa: line one line two line three"');
+    assert.equal(commands![1], 'data modify storage broadcast:log msg set value "🎮 lomokwa: line one line two line three"');
   });
 
   test('truncates messages to 256 characters', () => {
     const commands = buildBroadcastCommands('lomokwa', 'x'.repeat(300));
-    const match = /value "\[Discord\] lomokwa: (x+)"/.exec(commands![1]);
+    const match = /value "🎮 lomokwa: (x+)"/.exec(commands![1]);
     assert.equal(match?.[1]?.length, 256);
   });
 
@@ -65,5 +65,19 @@ describe('buildBroadcastCommands', () => {
 
   test('returns null when the message sanitizes to empty', () => {
     assert.equal(buildBroadcastCommands('lomokwa', '   '), null);
+  });
+
+  test('adds a "[DEV] " prefix to the tellraw tag and log record when isDev is true', () => {
+    const commands = buildBroadcastCommands('lomokwa', 'hello there', '#FF0000', true);
+    const component = JSON.parse(commands![0].slice('tellraw @a '.length));
+    assert.ok(JSON.stringify(component).includes('[DEV] '));
+    assert.equal(commands![1], 'data modify storage broadcast:log msg set value "[DEV] 🎮 lomokwa: hello there"');
+  });
+
+  test('omits the "[DEV]" tag by default (isDev defaults to false)', () => {
+    const commands = buildBroadcastCommands('lomokwa', 'hello there', '#FF0000');
+    const component = JSON.parse(commands![0].slice('tellraw @a '.length));
+    assert.ok(!JSON.stringify(component).includes('DEV'));
+    assert.equal(commands![1], 'data modify storage broadcast:log msg set value "🎮 lomokwa: hello there"');
   });
 });

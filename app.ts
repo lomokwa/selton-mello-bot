@@ -4,6 +4,7 @@ import { resolveIntroChannelId, getGuildsWithBotChannel, getBotChannelId } from 
 import { commandsByName } from './commands/index.js';
 import { startConsoleStream, ChatMessage } from './mcManager/consoleStream.js';
 import { broadcastDiscordMessageToMinecraft } from './mcManager/discordBroadcast.js';
+import { requestLinkFromMinecraft } from './mcManager/accountLinking.js';
 import { sanitizeMessageContent, sanitizeWebhookUsername, getPlayerHeadUrl } from './sanitize.js';
 
 const token = process.env.DISCORD_TOKEN;
@@ -11,6 +12,13 @@ const token = process.env.DISCORD_TOKEN;
 if (!token) {
   throw new Error('DISCORD_TOKEN environment variable is required');
 }
+
+// Same "GUILD_ID is set" signal deploy-commands.ts uses to distinguish a dev
+// bot (guild-scoped commands) from prod (global commands) — see .env.dev.
+// Dev and prod bots can share the same Minecraft server (mc-manager-server
+// supports multiple simultaneous subscribers), so Minecraft-bound messages
+// get a "[DEV]" tag to keep test chatter distinguishable from a real relay.
+const isDevMode = Boolean(process.env.GUILD_ID);
 
 export const bot = new Client({
   // MessageContent is a privileged intent — enable it for this bot in the
@@ -96,7 +104,7 @@ bot.on(Events.MessageCreate, async (message: Message) => {
 
   console.log(`Relaying Discord message from ${message.author.tag} to Minecraft: ${message.content}`);
   try {
-    broadcastDiscordMessageToMinecraft(displayName, message.content, nameColor);
+    broadcastDiscordMessageToMinecraft(displayName, message.content, nameColor, isDevMode);
   } catch (error) {
     console.error('Failed to relay Discord message to Minecraft:', error);
   }
@@ -166,7 +174,17 @@ async function getOrCreateChatWebhook(channel: unknown): Promise<Webhook | null>
   }
 }
 
+// In-game trigger for account linking (see mcManager/accountLinking.ts):
+// typing this in Minecraft chat whispers a one-time code back to the player,
+// which they confirm with /link confirm <code> in Discord.
+const LINK_TRIGGER = '!link';
+
 async function broadcastMinecraftChatMessage(chat: ChatMessage): Promise<void> {
+  if (chat.message.trim().toLowerCase() === LINK_TRIGGER) {
+    requestLinkFromMinecraft(chat.username);
+    return; // don't relay the "!link" trigger itself into Discord chat
+  }
+
   const username = sanitizeWebhookUsername(chat.username);
   const content = sanitizeMessageContent(chat.message);
 

@@ -23,6 +23,10 @@ const MAX_MESSAGE_LENGTH = 256;
 // player chat and from the site's "[Admin]" broadcasts (gold/aqua).
 const DISCORD_BLURPLE = '#5865F2';
 
+// Warning-orange, used for the "[DEV]" tag so it's unmistakably different
+// from every other color already in use (Discord blurple, admin gold/aqua).
+const DEV_TAG_COLOR = '#FFA500';
+
 // Collapses newlines so a single Discord message can't smuggle a second
 // console command onto its own line.
 function sanitizeText(input: string): string {
@@ -34,11 +38,10 @@ function snbt(s: string): string {
   return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-function discordLabelParts(username: string, nameColor: string): Record<string, unknown>[] {
+function discordLabelParts(username: string, nameColor: string, isDev: boolean): Record<string, unknown>[] {
   return [
-    { text: '[', color: 'gray' },
-    { text: 'Discord', color: DISCORD_BLURPLE, bold: true },
-    { text: ']', color: 'gray' },
+    ...(isDev ? [{ text: '[DEV] ', color: DEV_TAG_COLOR, bold: true }] : []),
+    { text: '🎮', color: DISCORD_BLURPLE, bold: true },
     { text: ` ${username}`, color: nameColor, bold: true },
   ];
 }
@@ -48,9 +51,18 @@ function discordLabelParts(username: string, nameColor: string): Record<string, 
  * console log. `nameColor` should be the sender's Discord role color as a
  * "#RRGGBB" hex string (Minecraft's tellraw supports hex colors directly);
  * pass undefined to fall back to a neutral white for users with no colored role.
+ * `isDev` tags the message with "[DEV]" — set this when relaying from a dev
+ * bot instance (see GUILD_ID in .env.dev), since dev and prod bots can share
+ * the same Minecraft server and players need to tell test chatter apart from
+ * a real Discord relay.
  */
-export function broadcastDiscordMessageToMinecraft(username: string, message: string, nameColor?: string): void {
-  const commands = buildBroadcastCommands(username, message, nameColor);
+export function broadcastDiscordMessageToMinecraft(
+  username: string,
+  message: string,
+  nameColor?: string,
+  isDev = false,
+): void {
+  const commands = buildBroadcastCommands(username, message, nameColor, isDev);
   if (!commands) return;
 
   for (const command of commands) {
@@ -65,17 +77,22 @@ export function broadcastDiscordMessageToMinecraft(username: string, message: st
  * can be unit tested independently of the live WebSocket connection.
  * Returns null if the sanitized username or message end up empty.
  */
-export function buildBroadcastCommands(username: string, message: string, nameColor?: string): string[] | null {
+export function buildBroadcastCommands(
+  username: string,
+  message: string,
+  nameColor?: string,
+  isDev = false,
+): string[] | null {
   const name = sanitizeText(username);
   const msg = sanitizeText(message).slice(0, MAX_MESSAGE_LENGTH);
   if (!name || !msg) return null;
 
   const color = nameColor && /^#[0-9a-fA-F]{6}$/.test(nameColor) ? nameColor : '#FFFFFF';
 
-  const record = `[Discord] ${name}: ${msg}`;
+  const record = `${isDev ? '[DEV] ' : ''}🎮 ${name}: ${msg}`;
   const component = [
     '',
-    ...discordLabelParts(name, color),
+    ...discordLabelParts(name, color, isDev),
     { text: ': ', color: 'gray' },
     { text: msg, color: 'white' },
   ];
