@@ -102,8 +102,12 @@ async function connect(onChatMessage: ChatMessageHandler): Promise<void> {
     if (res.statusCode === 401) {
       invalidateToken();
     }
+    // Don't call scheduleReconnect here: terminate() on a still-CONNECTING
+    // socket (which this always is at this point) runs ws's abortHandshake
+    // path, which emits 'close' — and that handler already schedules a
+    // reconnect. Scheduling one here too would open two concurrent sockets,
+    // both relaying every chat line into Discord (i.e. duplicate messages).
     socket.terminate();
-    scheduleReconnect(onChatMessage);
   });
 
   socket.on('message', (data) => {
