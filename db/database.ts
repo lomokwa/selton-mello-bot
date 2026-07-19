@@ -1,9 +1,14 @@
 import Database from 'better-sqlite3';
+import fs from 'fs';
 import path from 'path';
 
-// Stored relative to the working directory the bot is started from (project root),
-// so it persists across rebuilds regardless of running from source or dist/.
-const dbPath = path.join(process.cwd(), 'bot.sqlite3');
+// Stored under data/ (relative to the working directory the bot is started
+// from, i.e. the project root) so it survives rebuilds and stays out of the
+// project root, regardless of running from source or dist/.
+const dataDir = path.join(process.cwd(), 'data');
+fs.mkdirSync(dataDir, { recursive: true });
+
+const dbPath = path.join(dataDir, 'bot.sqlite3');
 
 export const db = new Database(dbPath);
 db.pragma('journal_mode = WAL');
