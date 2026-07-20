@@ -232,6 +232,39 @@ async function resolveMinecraftMentions(guild: Guild, text: string): Promise<str
   return text.replace(MENTION_PATTERN, (full, name: string) => mentionsByName.get(name.toLowerCase()) ?? full);
 }
 
+// Matches ":name:" tokens a player can type in Minecraft chat to reference a
+// custom Discord emoji by name (e.g. ":Pepega:"), using Discord's own custom
+// emoji name character set (letters, digits, underscores; 2-32 chars).
+const EMOJI_NAME_PATTERN = /:([a-zA-Z0-9_]{2,32}):/g;
+
+// Resolves ":name:" tokens into real "<:name:id>" (or "<a:name:id>" for
+// animated) custom emoji syntax for the given guild, so players don't need to
+// know/type the emoji's numeric ID. Uses the REST emoji-list endpoint, which
+// (like member search above) doesn't require a privileged gateway intent.
+async function resolveMinecraftEmojiNames(guild: Guild, text: string): Promise<string> {
+  const names = new Set([...text.matchAll(EMOJI_NAME_PATTERN)].map((match) => match[1]));
+  if (names.size === 0) return text;
+
+  let emojis;
+  try {
+    emojis = await guild.emojis.fetch();
+  } catch (error) {
+    console.error(`Failed to fetch custom emoji for guild ${guild.id}:`, error);
+    return text;
+  }
+
+  const emojiByName = new Map<string, string>();
+  for (const name of names) {
+    const emoji = emojis.find((candidate) => candidate.name?.toLowerCase() === name.toLowerCase());
+    if (emoji) {
+      emojiByName.set(name.toLowerCase(), `<${emoji.animated ? 'a' : ''}:${emoji.name}:${emoji.id}>`);
+    }
+  }
+  if (emojiByName.size === 0) return text;
+
+  return text.replace(EMOJI_NAME_PATTERN, (full, name: string) => emojiByName.get(name.toLowerCase()) ?? full);
+}
+
 async function broadcastMinecraftChatMessage(chat: ChatMessage): Promise<void> {
   if (chat.message.trim().toLowerCase() === LINK_TRIGGER) {
     requestLinkFromMinecraft(chat.username);
@@ -260,7 +293,7 @@ async function broadcastMinecraftChatMessage(chat: ChatMessage): Promise<void> {
       if (!channel || !channel.isTextBased() || !('send' in channel)) continue;
 
       const webhook = await getOrCreateChatWebhook(channel);
-      const relayedContent = await resolveMinecraftMentions(guild, content);
+      const relayedContent = await resolveMinecraftEmojiNames(guild, await resolveMinecraftMentions(guild, content));
       let relayedMessage;
       if (webhook) {
         relayedMessage = await webhook.send({

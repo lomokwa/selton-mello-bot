@@ -19,6 +19,28 @@ describe('sanitizeMessageContent', () => {
   test('leaves plain text untouched', () => {
     assert.equal(sanitizeMessageContent('hello world'), 'hello world');
   });
+
+  test('leaves valid custom emoji syntax untouched so it still renders', () => {
+    assert.equal(sanitizeMessageContent('<:PogU:531255068251521024>'), '<:PogU:531255068251521024>');
+    assert.equal(sanitizeMessageContent('poggers <:PogU:531255068251521024> nice'), 'poggers <:PogU:531255068251521024> nice');
+  });
+
+  test('leaves valid animated custom emoji syntax untouched', () => {
+    assert.equal(sanitizeMessageContent('<a:dance:531255068251521024>'), '<a:dance:531255068251521024>');
+  });
+
+  test('still escapes ">" when it is not part of valid custom emoji syntax', () => {
+    assert.equal(sanitizeMessageContent('<:tooShortId:1>'), '<:tooShortId:1\\>');
+    assert.equal(sanitizeMessageContent('a > b'), 'a \\> b');
+    assert.equal(sanitizeMessageContent('<:notAnEmoji>'), '<:notAnEmoji\\>');
+  });
+
+  test('escapes multiple custom emoji correctly without leaking placeholders', () => {
+    assert.equal(
+      sanitizeMessageContent('<:PogU:531255068251521024><:PogU:531255068251521024>'),
+      '<:PogU:531255068251521024><:PogU:531255068251521024>',
+    );
+  });
 });
 
 describe('sanitizeWebhookUsername', () => {
