@@ -6,6 +6,7 @@ import { startConsoleStream, ChatMessage } from './mcManager/consoleStream.js';
 import { broadcastDiscordMessageToMinecraft } from './mcManager/discordBroadcast.js';
 import { requestLinkFromMinecraft } from './mcManager/accountLinking.js';
 import { sanitizeMessageContent, sanitizeWebhookUsername, getPlayerHeadUrl } from './sanitize.js';
+import { startPresenceRotation } from './presence.js';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -30,6 +31,7 @@ export const bot = new Client({
 bot.once(Events.ClientReady, (readyClient: Client<true>) => {
   console.log(`Ready! Logged in as ${readyClient.user.tag}`);
   startConsoleStream(broadcastMinecraftChatMessage);
+  startPresenceRotation(readyClient);
 });
 
 const introMessage =
