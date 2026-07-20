@@ -92,15 +92,30 @@ bot.on(Events.MessageCreate, async (message: Message) => {
   if (message.author.bot || message.webhookId) return;
   if (!message.content.trim()) return;
 
-  const botChannelId = getBotChannelId(message.guildId);
-  if (message.channelId !== botChannelId) return;
-
   const member = message.member;
   const displayName = member?.displayName ?? message.author.username;
   // displayColor is 0 when the member has no colored role (or only @everyone) —
   // treat that as "no color" so the broadcast falls back to a neutral white
   // instead of literally coloring the name black.
   const nameColor = member && member.displayColor !== 0 ? member.displayHexColor : undefined;
+
+  // Easter egg: reply "Selton Mello" whenever the phrase appears in a message,
+  // regardless of case or surrounding text, and relay it into Minecraft too.
+  if (message.content.toLowerCase().includes('selton mello')) {
+    try {
+      await message.reply('Selton Mello');
+    } catch (error) {
+      console.error('Failed to reply with "Selton Mello":', error);
+    }
+    try {
+      broadcastDiscordMessageToMinecraft(displayName, 'Selton Mello', nameColor, isDevMode);
+    } catch (error) {
+      console.error('Failed to relay "Selton Mello" reply to Minecraft:', error);
+    }
+  }
+
+  const botChannelId = getBotChannelId(message.guildId);
+  if (message.channelId !== botChannelId) return;
 
   console.log(`Relaying Discord message from ${message.author.tag} to Minecraft: ${message.content}`);
   try {
