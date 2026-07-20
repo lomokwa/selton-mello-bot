@@ -108,7 +108,8 @@ bot.on(Events.MessageCreate, async (message: Message) => {
       console.error('Failed to reply with "Selton Mello":', error);
     }
     try {
-      broadcastDiscordMessageToMinecraft(displayName, 'Selton Mello', nameColor, isDevMode);
+      // Attribute this to the bot itself, not the triggering user.
+      broadcastDiscordMessageToMinecraft('Selton Mello', 'Selton Mello', undefined, isDevMode);
     } catch (error) {
       console.error('Failed to relay "Selton Mello" reply to Minecraft:', error);
     }
@@ -194,10 +195,59 @@ async function getOrCreateChatWebhook(channel: unknown): Promise<Webhook | null>
 // which they confirm with /link confirm <code> in Discord.
 const LINK_TRIGGER = '!link';
 
+// Matches "@name" tokens a player can type in Minecraft chat to ping a Discord
+// user, using Discord's own username character set (lowercase letters,
+// digits, underscores, periods; 2-32 chars).
+const MENTION_PATTERN = /@([a-z0-9_.]{2,32})/gi;
+
+// Resolves "@name" tokens in Minecraft chat text into real Discord mentions
+// for the given guild, so players can ping someone by typing e.g. "@lomokwa".
+// Uses the REST member-search endpoint (no privileged Members intent needed)
+// and only pings on an exact username/nickname match to avoid mis-pinging the
+// wrong person off a fuzzy prefix match.
+async function resolveMinecraftMentions(guild: Guild, text: string): Promise<string> {
+  const names = new Set([...text.matchAll(MENTION_PATTERN)].map((match) => match[1]));
+  if (names.size === 0) return text;
+
+  const mentionsByName = new Map<string, string>();
+  await Promise.all(
+    [...names].map(async (name) => {
+      try {
+        const results = await guild.members.search({ query: name, limit: 1 });
+        const member = results.first();
+        if (
+          member &&
+          (member.user.username.toLowerCase() === name.toLowerCase() ||
+            member.displayName.toLowerCase() === name.toLowerCase())
+        ) {
+          mentionsByName.set(name.toLowerCase(), `<@${member.id}>`);
+        }
+      } catch (error) {
+        console.error(`Failed to resolve Minecraft "@${name}" mention in guild ${guild.id}:`, error);
+      }
+    }),
+  );
+  if (mentionsByName.size === 0) return text;
+
+  return text.replace(MENTION_PATTERN, (full, name: string) => mentionsByName.get(name.toLowerCase()) ?? full);
+}
+
 async function broadcastMinecraftChatMessage(chat: ChatMessage): Promise<void> {
   if (chat.message.trim().toLowerCase() === LINK_TRIGGER) {
     requestLinkFromMinecraft(chat.username);
     return; // don't relay the "!link" trigger itself into Discord chat
+  }
+
+  const isSeltonMello = chat.message.toLowerCase().includes('selton mello');
+
+  // Easter egg: reply "Selton Mello" whenever a player types the phrase in
+  // Minecraft chat, regardless of case or surrounding text.
+  if (isSeltonMello) {
+    try {
+      broadcastDiscordMessageToMinecraft('Selton Mello', 'Selton Mello', undefined, isDevMode);
+    } catch (error) {
+      console.error('Failed to reply "Selton Mello" in Minecraft:', error);
+    }
   }
 
   const username = sanitizeWebhookUsername(chat.username);
@@ -210,9 +260,11 @@ async function broadcastMinecraftChatMessage(chat: ChatMessage): Promise<void> {
       if (!channel || !channel.isTextBased() || !('send' in channel)) continue;
 
       const webhook = await getOrCreateChatWebhook(channel);
+      const relayedContent = await resolveMinecraftMentions(guild, content);
+      let relayedMessage;
       if (webhook) {
-        await webhook.send({
-          content,
+        relayedMessage = await webhook.send({
+          content: relayedContent,
           username,
           avatarURL: getPlayerHeadUrl(chat.username),
         });
@@ -220,7 +272,13 @@ async function broadcastMinecraftChatMessage(chat: ChatMessage): Promise<void> {
         // Fallback if the bot lacks Manage Webhooks permission in this channel.
         // Unlike the webhook path, this is a regular message where markdown renders,
         // so the username needs escaping here too.
-        await channel.send(`**${sanitizeMessageContent(username)}**: ${content}`);
+        relayedMessage = await channel.send(`**${sanitizeMessageContent(username)}**: ${relayedContent}`);
+      }
+
+      // Reply to the just-relayed player message so the "Selton Mello" reply
+      // shows up after it in the channel, rather than racing ahead of it.
+      if (isSeltonMello) {
+        await channel.send({ content: 'Selton Mello', reply: { messageReference: relayedMessage.id } });
       }
     } catch (error) {
       console.error(`Failed to forward Minecraft chat message to guild ${guildId}:`, error);

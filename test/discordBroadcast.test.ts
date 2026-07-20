@@ -35,27 +35,27 @@ describe('buildBroadcastCommands', () => {
     assert.match(JSON.stringify(component), /"#FFFFFF"/);
   });
 
-  test('the data-modify record matches "🎮 <name>: <message>"', () => {
+  test('the data-modify record matches "<🎮 name> <message>"', () => {
     const commands = buildBroadcastCommands('lomokwa', 'hello there');
-    assert.equal(commands![1], 'data modify storage broadcast:log msg set value "🎮 lomokwa: hello there"');
+    assert.equal(commands![1], 'data modify storage broadcast:log msg set value "<🎮 lomokwa> hello there"');
   });
 
   test('escapes quotes and backslashes in the SNBT string literal', () => {
     const commands = buildBroadcastCommands('lomokwa', 'she said "hi" \\o/');
     assert.equal(
       commands![1],
-      'data modify storage broadcast:log msg set value "🎮 lomokwa: she said \\"hi\\" \\\\o/"',
+      'data modify storage broadcast:log msg set value "<🎮 lomokwa> she said \\"hi\\" \\\\o/"',
     );
   });
 
   test('collapses newlines so a message cannot inject extra console commands', () => {
     const commands = buildBroadcastCommands('lomokwa', 'line one\nline two\r\nline three');
-    assert.equal(commands![1], 'data modify storage broadcast:log msg set value "🎮 lomokwa: line one line two line three"');
+    assert.equal(commands![1], 'data modify storage broadcast:log msg set value "<🎮 lomokwa> line one line two line three"');
   });
 
   test('truncates messages to 256 characters', () => {
     const commands = buildBroadcastCommands('lomokwa', 'x'.repeat(300));
-    const match = /value "🎮 lomokwa: (x+)"/.exec(commands![1]);
+    const match = /value "<🎮 lomokwa> (x+)"/.exec(commands![1]);
     assert.equal(match?.[1]?.length, 256);
   });
 
@@ -71,13 +71,13 @@ describe('buildBroadcastCommands', () => {
     const commands = buildBroadcastCommands('lomokwa', 'hello there', '#FF0000', true);
     const component = JSON.parse(commands![0].slice('tellraw @a '.length));
     assert.ok(JSON.stringify(component).includes('[DEV] '));
-    assert.equal(commands![1], 'data modify storage broadcast:log msg set value "[DEV] 🎮 lomokwa: hello there"');
+    assert.equal(commands![1], 'data modify storage broadcast:log msg set value "[DEV] <🎮 lomokwa> hello there"');
   });
 
   test('omits the "[DEV]" tag by default (isDev defaults to false)', () => {
     const commands = buildBroadcastCommands('lomokwa', 'hello there', '#FF0000');
     const component = JSON.parse(commands![0].slice('tellraw @a '.length));
     assert.ok(!JSON.stringify(component).includes('DEV'));
-    assert.equal(commands![1], 'data modify storage broadcast:log msg set value "🎮 lomokwa: hello there"');
+    assert.equal(commands![1], 'data modify storage broadcast:log msg set value "<🎮 lomokwa> hello there"');
   });
 });

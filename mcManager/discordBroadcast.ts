@@ -41,8 +41,10 @@ function snbt(s: string): string {
 function discordLabelParts(username: string, nameColor: string, isDev: boolean): Record<string, unknown>[] {
   return [
     ...(isDev ? [{ text: '[DEV] ', color: DEV_TAG_COLOR, bold: true }] : []),
+    { text: '<', color: 'gray' },
     { text: '🎮', color: DISCORD_BLURPLE, bold: true },
     { text: ` ${username}`, color: nameColor, bold: true },
+    { text: '>', color: 'gray' },
   ];
 }
 
@@ -89,11 +91,11 @@ export function buildBroadcastCommands(
 
   const color = nameColor && /^#[0-9a-fA-F]{6}$/.test(nameColor) ? nameColor : '#FFFFFF';
 
-  const record = `${isDev ? '[DEV] ' : ''}🎮 ${name}: ${msg}`;
+  const record = `${isDev ? '[DEV] ' : ''}<🎮 ${name}> ${msg}`;
   const component = [
     '',
     ...discordLabelParts(name, color, isDev),
-    { text: ': ', color: 'gray' },
+    { text: ' ', color: 'gray' },
     { text: msg, color: 'white' },
   ];
 
