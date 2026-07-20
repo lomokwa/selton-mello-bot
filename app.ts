@@ -2,7 +2,7 @@ import 'dotenv/config';
 import { Client, GatewayIntentBits, Events, Guild, Webhook, Collection, Message } from 'discord.js';
 import { resolveIntroChannelId, getGuildsWithBotChannel, getBotChannelId } from './db/guildSettings.js';
 import { commandsByName } from './commands/index.js';
-import { startConsoleStream, ChatMessage } from './mcManager/consoleStream.js';
+import { startConsoleStream, ChatMessage, ServerEvent } from './mcManager/consoleStream.js';
 import { broadcastDiscordMessageToMinecraft } from './mcManager/discordBroadcast.js';
 import { requestLinkFromMinecraft } from './mcManager/accountLinking.js';
 import { sanitizeMessageContent, sanitizeWebhookUsername, getPlayerHeadUrl } from './sanitize.js';
@@ -29,7 +29,7 @@ export const bot = new Client({
 
 bot.once(Events.ClientReady, (readyClient: Client<true>) => {
   console.log(`Ready! Logged in as ${readyClient.user.tag}`);
-  startConsoleStream(broadcastMinecraftChatMessage);
+  startConsoleStream(broadcastMinecraftChatMessage, broadcastServerEvent);
 });
 
 const introMessage =
@@ -315,6 +315,42 @@ async function broadcastMinecraftChatMessage(chat: ChatMessage): Promise<void> {
       }
     } catch (error) {
       console.error(`Failed to forward Minecraft chat message to guild ${guildId}:`, error);
+    }
+  }
+}
+
+function formatServerEvent(event: ServerEvent): string {
+  switch (event.kind) {
+    case 'join':
+      return `🟢 **${event.username}** entrou no servidor.`;
+    case 'leave':
+      return `🔴 **${event.username}** saiu do servidor.`;
+    case 'advancement':
+      return `🏆 **${event.username}** completou o objetivo: *${event.detail}*`;
+    case 'death':
+      return `💀 ${event.detail}`;
+    case 'server_down':
+      return '🔴 O servidor de Minecraft parou.';
+    case 'server_up':
+      return '🟢 O servidor de Minecraft voltou ao ar.';
+  }
+}
+
+// Bridges joins/leaves/advancements/deaths/server up-down into every guild's
+// configured bot channel. Unlike chat (broadcastMinecraftChatMessage), these
+// are plain bot messages rather than per-player webhook posts — there's no
+// single "author" to attribute an avatar to for a server-lifecycle event.
+async function broadcastServerEvent(event: ServerEvent): Promise<void> {
+  const content = formatServerEvent(event);
+
+  for (const { guildId, botChannelId } of getGuildsWithBotChannel()) {
+    try {
+      const guild = await bot.guilds.fetch(guildId);
+      const channel = await guild.channels.fetch(botChannelId);
+      if (!channel || !channel.isTextBased() || !('send' in channel)) continue;
+      await channel.send(content);
+    } catch (error) {
+      console.error(`Failed to forward server event (${event.kind}) to guild ${guildId}:`, error);
     }
   }
 }
