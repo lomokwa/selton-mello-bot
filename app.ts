@@ -3,7 +3,7 @@ import { Client, GatewayIntentBits, Events, Guild, Webhook, Collection, Message,
 import { resolveIntroChannelId, getGuildsWithBotChannel, getBotChannelId } from './db/guildSettings.js';
 import { commandsByName } from './commands/index.js';
 import { startConsoleStream, ChatMessage, ServerEvent, sendCommand } from './mcManager/consoleStream.js';
-import { broadcastDiscordMessageToMinecraft, buildReplySnippet, ReplyContext } from './mcManager/discordBroadcast.js';
+import { broadcastDiscordMessageToMinecraft, buildReplySnippet, resolveMentions, ReplyContext } from './mcManager/discordBroadcast.js';
 import { requestLinkFromMinecraft, isValidMinecraftUsername } from './mcManager/accountLinking.js';
 import { sanitizeMessageContent, sanitizeWebhookUsername, getPlayerHeadUrl } from './sanitize.js';
 import { isPlayerOp, buildOnlineMessage, listPlayers } from './mcManager/players.js';
@@ -145,14 +145,21 @@ bot.on(Events.MessageCreate, async (message: Message) => {
   if (message.channelId !== botChannelId) return;
 
   const replyTo = await resolveReplyContext(message);
+  const content = resolveMentions(message.content, (id) => mentionDisplayName(message, id));
 
   console.log(`Relaying Discord message from ${message.author.tag} to Minecraft: ${message.content}`);
   try {
-    broadcastDiscordMessageToMinecraft(displayName, message.content, nameColor, isDevMode, replyTo);
+    broadcastDiscordMessageToMinecraft(displayName, content, nameColor, isDevMode, replyTo);
   } catch (error) {
     console.error('Failed to relay Discord message to Minecraft:', error);
   }
 });
+
+// The mentioned user's server nickname (falling back to their username if they have none, or aren't a member
+// of this guild anymore) — used to turn a raw <@id> mention token into readable "@name" text for Minecraft chat.
+function mentionDisplayName(message: Message, userId: string): string | undefined {
+  return message.mentions.members?.get(userId)?.displayName ?? message.mentions.users.get(userId)?.username;
+}
 
 // If `message` is a reply (not a forward — Discord's own "forward a message" feature uses the same
 // `reference` mechanism with a different `type`), resolves who it replied to and a short preview of what
@@ -163,7 +170,8 @@ async function resolveReplyContext(message: Message): Promise<ReplyContext | und
   try {
     const referenced = await message.fetchReference();
     const authorName = referenced.member?.displayName ?? referenced.author.username;
-    return { authorName, snippet: buildReplySnippet(referenced.content) };
+    const content = resolveMentions(referenced.content, (id) => mentionDisplayName(referenced, id));
+    return { authorName, snippet: buildReplySnippet(content) };
   } catch (error) {
     console.error('Failed to fetch replied-to message for the reply indicator:', error);
     return undefined;
