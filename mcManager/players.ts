@@ -48,3 +48,16 @@ export async function isPlayerOp(minecraftUsername: string): Promise<boolean | n
   const player = players.find((p) => p.name.toLowerCase() === minecraftUsername.toLowerCase());
   return player ? player.is_op : null;
 }
+
+/** Builds the "!online" reply text from a player list — pure, so it's testable without mocking the API call. */
+export function buildOnlineMessage(players: Player[]): string {
+  const online = players.filter((player) => player.online);
+  if (online.length === 0) {
+    return 'Ninguém online no servidor agora.';
+  }
+  const names = online
+    .map((player) => player.name)
+    .sort((a, b) => a.localeCompare(b))
+    .join(', ');
+  return `**${online.length}** jogador${online.length === 1 ? '' : 'es'} online: ${names}`;
+}
