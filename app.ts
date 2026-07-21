@@ -1,9 +1,9 @@
 import 'dotenv/config';
-import { Client, GatewayIntentBits, Events, Guild, Webhook, Collection, Message } from 'discord.js';
+import { Client, GatewayIntentBits, Events, Guild, Webhook, Collection, Message, MessageReferenceType } from 'discord.js';
 import { resolveIntroChannelId, getGuildsWithBotChannel, getBotChannelId } from './db/guildSettings.js';
 import { commandsByName } from './commands/index.js';
 import { startConsoleStream, ChatMessage, ServerEvent, sendCommand } from './mcManager/consoleStream.js';
-import { broadcastDiscordMessageToMinecraft } from './mcManager/discordBroadcast.js';
+import { broadcastDiscordMessageToMinecraft, buildReplySnippet, ReplyContext } from './mcManager/discordBroadcast.js';
 import { requestLinkFromMinecraft, isValidMinecraftUsername } from './mcManager/accountLinking.js';
 import { sanitizeMessageContent, sanitizeWebhookUsername, getPlayerHeadUrl } from './sanitize.js';
 import { isPlayerOp, buildOnlineMessage, listPlayers } from './mcManager/players.js';
@@ -144,13 +144,31 @@ bot.on(Events.MessageCreate, async (message: Message) => {
   const botChannelId = getBotChannelId(message.guildId);
   if (message.channelId !== botChannelId) return;
 
+  const replyTo = await resolveReplyContext(message);
+
   console.log(`Relaying Discord message from ${message.author.tag} to Minecraft: ${message.content}`);
   try {
-    broadcastDiscordMessageToMinecraft(displayName, message.content, nameColor, isDevMode);
+    broadcastDiscordMessageToMinecraft(displayName, message.content, nameColor, isDevMode, replyTo);
   } catch (error) {
     console.error('Failed to relay Discord message to Minecraft:', error);
   }
 });
+
+// If `message` is a reply (not a forward — Discord's own "forward a message" feature uses the same
+// `reference` mechanism with a different `type`), resolves who it replied to and a short preview of what
+// they said, for the in-game reply indicator. Best-effort: a fetch failure (e.g. the original was deleted)
+// just means no indicator, never blocks the relay itself.
+async function resolveReplyContext(message: Message): Promise<ReplyContext | undefined> {
+  if (!message.reference || message.reference.type === MessageReferenceType.Forward) return undefined;
+  try {
+    const referenced = await message.fetchReference();
+    const authorName = referenced.member?.displayName ?? referenced.author.username;
+    return { authorName, snippet: buildReplySnippet(referenced.content) };
+  } catch (error) {
+    console.error('Failed to fetch replied-to message for the reply indicator:', error);
+    return undefined;
+  }
+}
 
 bot.login(token).catch((error) => {
   console.error('Failed to log in to Discord:', error);

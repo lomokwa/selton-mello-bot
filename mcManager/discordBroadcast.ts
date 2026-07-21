@@ -33,6 +33,23 @@ function sanitizeText(input: string): string {
   return input.replace(/[\r\n]+/g, ' ').trim();
 }
 
+/** Who a relayed Discord message was replying to, and a short preview of what that message said — see
+ *  buildReplySnippet(). Undefined entirely when the message wasn't a reply. */
+export interface ReplyContext {
+  authorName: string;
+  snippet: string;
+}
+
+const REPLY_SNIPPET_MAX_LENGTH = 60;
+
+/** Truncates a replied-to message's content to a short one-line preview for the in-game reply indicator —
+ *  same newline-collapsing as sanitizeText, since the original could itself be multi-line. */
+export function buildReplySnippet(content: string): string {
+  const flat = sanitizeText(content);
+  if (!flat) return '(sem texto)';
+  return flat.length > REPLY_SNIPPET_MAX_LENGTH ? `${flat.slice(0, REPLY_SNIPPET_MAX_LENGTH)}...` : flat;
+}
+
 // An SNBT string literal: wrap in quotes and escape the two special characters.
 function snbt(s: string): string {
   return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
@@ -63,8 +80,9 @@ export function broadcastDiscordMessageToMinecraft(
   message: string,
   nameColor?: string,
   isDev = false,
+  replyTo?: ReplyContext,
 ): void {
-  const commands = buildBroadcastCommands(username, message, nameColor, isDev);
+  const commands = buildBroadcastCommands(username, message, nameColor, isDev, replyTo);
   if (!commands) return;
 
   for (const command of commands) {
@@ -84,6 +102,7 @@ export function buildBroadcastCommands(
   message: string,
   nameColor?: string,
   isDev = false,
+  replyTo?: ReplyContext,
 ): string[] | null {
   const name = sanitizeText(username);
   const msg = sanitizeText(message).slice(0, MAX_MESSAGE_LENGTH);
@@ -91,9 +110,15 @@ export function buildBroadcastCommands(
 
   const color = nameColor && /^#[0-9a-fA-F]{6}$/.test(nameColor) ? nameColor : '#FFFFFF';
 
-  const record = `${isDev ? '[DEV] ' : ''}<🎮 ${name}> ${msg}`;
+  // "\n" inside a single tellraw text component renders as a real line break in chat, so the reply indicator
+  // and the actual message land as ONE chat entry (indicator on top, message below), not two separate ones.
+  const replyAuthor = replyTo ? sanitizeText(replyTo.authorName) : '';
+  const replyLine = replyTo && replyAuthor ? `↱ Resposta a ${replyAuthor}: ${replyTo.snippet}\n` : '';
+
+  const record = `${isDev ? '[DEV] ' : ''}${replyLine ? `[${replyLine.slice(0, -1)}] ` : ''}<🎮 ${name}> ${msg}`;
   const component = [
     '',
+    ...(replyLine ? [{ text: replyLine, color: 'gray' }] : []),
     ...discordLabelParts(name, color, isDev),
     { text: ' ', color: 'gray' },
     { text: msg, color: 'white' },

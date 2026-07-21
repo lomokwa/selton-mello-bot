@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildBroadcastCommands } from '../mcManager/discordBroadcast.js';
+import { buildBroadcastCommands, buildReplySnippet } from '../mcManager/discordBroadcast.js';
 
 describe('buildBroadcastCommands', () => {
   test('builds the tellraw + data modify + data get command sequence', () => {
@@ -79,5 +79,56 @@ describe('buildBroadcastCommands', () => {
     const component = JSON.parse(commands![0].slice('tellraw @a '.length));
     assert.ok(!JSON.stringify(component).includes('DEV'));
     assert.equal(commands![1], 'data modify storage broadcast:log msg set value "<🎮 lomokwa> hello there"');
+  });
+
+  test('adds a gray reply-indicator line before the message when replyTo is given', () => {
+    const commands = buildBroadcastCommands('lomokwa', 'sure thing', undefined, false, {
+      authorName: 'Ant_Redstone',
+      snippet: 'anyone up for building tonight?',
+    });
+    const component = JSON.parse(commands![0].slice('tellraw @a '.length));
+    const asText = JSON.stringify(component);
+    assert.ok(asText.includes('↱ Resposta a Ant_Redstone: anyone up for building tonight?'));
+    assert.ok(asText.includes('"color":"gray"'));
+    // the reply line and the actual message must be ONE tellraw component (via an embedded "\n"), not two
+    // separate broadcasts -- otherwise they could land as separate chat entries with something else between.
+    assert.equal(commands?.length, 3);
+  });
+
+  test('omits the reply-indicator line entirely when replyTo is not given', () => {
+    const commands = buildBroadcastCommands('lomokwa', 'hello there');
+    const component = JSON.parse(commands![0].slice('tellraw @a '.length));
+    assert.ok(!JSON.stringify(component).includes('Resposta a'));
+  });
+
+  test('includes a bracketed reply summary in the data-modify record too', () => {
+    const commands = buildBroadcastCommands('lomokwa', 'sure thing', undefined, false, {
+      authorName: 'Ant_Redstone',
+      snippet: 'anyone up for building tonight?',
+    });
+    assert.equal(
+      commands![1],
+      'data modify storage broadcast:log msg set value "[↱ Resposta a Ant_Redstone: anyone up for building tonight?] <🎮 lomokwa> sure thing"',
+    );
+  });
+});
+
+describe('buildReplySnippet', () => {
+  test('returns short text unchanged', () => {
+    assert.equal(buildReplySnippet('hi there'), 'hi there');
+  });
+
+  test('truncates long text and adds an ellipsis', () => {
+    const snippet = buildReplySnippet('x'.repeat(100));
+    assert.equal(snippet, `${'x'.repeat(60)}...`);
+  });
+
+  test('collapses newlines, same as sanitizeText', () => {
+    assert.equal(buildReplySnippet('line one\nline two'), 'line one line two');
+  });
+
+  test('falls back to a placeholder for empty/whitespace-only content (e.g. an image-only message)', () => {
+    assert.equal(buildReplySnippet(''), '(sem texto)');
+    assert.equal(buildReplySnippet('   '), '(sem texto)');
   });
 });
