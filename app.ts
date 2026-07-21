@@ -2,13 +2,14 @@ import 'dotenv/config';
 import { Client, GatewayIntentBits, Events, Guild, Webhook, Collection, Message } from 'discord.js';
 import { resolveIntroChannelId, getGuildsWithBotChannel, getBotChannelId } from './db/guildSettings.js';
 import { commandsByName } from './commands/index.js';
-import { startConsoleStream, ChatMessage, sendCommand } from './mcManager/consoleStream.js';
+import { startConsoleStream, ChatMessage, ServerEvent, sendCommand } from './mcManager/consoleStream.js';
 import { broadcastDiscordMessageToMinecraft } from './mcManager/discordBroadcast.js';
 import { requestLinkFromMinecraft, isValidMinecraftUsername } from './mcManager/accountLinking.js';
 import { sanitizeMessageContent, sanitizeWebhookUsername, getPlayerHeadUrl } from './sanitize.js';
-import { isPlayerOp } from './mcManager/players.js';
+import { isPlayerOp, buildOnlineMessage, listPlayers } from './mcManager/players.js';
 import { getLinkedMinecraftUsername } from './db/accountLinks.js';
 import { parseWhitelistCommand } from './whitelistCommand.js';
+import { startPresenceRotation } from './presence.js';
 
 const token = process.env.DISCORD_TOKEN;
 
@@ -32,7 +33,8 @@ export const bot = new Client({
 
 bot.once(Events.ClientReady, (readyClient: Client<true>) => {
   console.log(`Ready! Logged in as ${readyClient.user.tag}`);
-  startConsoleStream(broadcastMinecraftChatMessage);
+  startConsoleStream(broadcastMinecraftChatMessage, broadcastServerEvent);
+  startPresenceRotation(readyClient);
 });
 
 const introMessage =
@@ -94,6 +96,18 @@ bot.on(Events.MessageCreate, async (message: Message) => {
   // "Minecraft Chat" webhook, so relayed Minecraft chat can't loop back.
   if (message.author.bot || message.webhookId) return;
   if (!message.content.trim()) return;
+
+  // "!online" — works in any channel, unlike the chat/event bridge below,
+  // which is scoped to the guild's configured bot channel.
+  if (/^!online\b/i.test(message.content)) {
+    try {
+      await message.reply(buildOnlineMessage(await listPlayers()));
+    } catch (error) {
+      console.error('!online: failed to fetch player list:', error);
+      await message.reply('Não consegui checar o servidor agora — tenta de novo daqui a pouco.');
+    }
+    return;
+  }
 
   // "!whitelist <username>" — works in any channel, same "linked + op" gate
   // as the /mc slash command (commands/mc.ts), reusing the exact same check
@@ -327,6 +341,42 @@ async function broadcastMinecraftChatMessage(chat: ChatMessage): Promise<void> {
       }
     } catch (error) {
       console.error(`Failed to forward Minecraft chat message to guild ${guildId}:`, error);
+    }
+  }
+}
+
+function formatServerEvent(event: ServerEvent): string {
+  switch (event.kind) {
+    case 'join':
+      return `🟢 **${event.username}** entrou no servidor.`;
+    case 'leave':
+      return `🔴 **${event.username}** saiu do servidor.`;
+    case 'advancement':
+      return `🏆 **${event.username}** completou o objetivo: *${event.detail}*`;
+    case 'death':
+      return `💀 ${event.detail}`;
+    case 'server_down':
+      return '🔴 O servidor de Minecraft parou.';
+    case 'server_up':
+      return '🟢 O servidor de Minecraft voltou ao ar.';
+  }
+}
+
+// Bridges joins/leaves/advancements/deaths/server up-down into every guild's
+// configured bot channel. Unlike chat (broadcastMinecraftChatMessage), these
+// are plain bot messages rather than per-player webhook posts — there's no
+// single "author" to attribute an avatar to for a server-lifecycle event.
+async function broadcastServerEvent(event: ServerEvent): Promise<void> {
+  const content = formatServerEvent(event);
+
+  for (const { guildId, botChannelId } of getGuildsWithBotChannel()) {
+    try {
+      const guild = await bot.guilds.fetch(guildId);
+      const channel = await guild.channels.fetch(botChannelId);
+      if (!channel || !channel.isTextBased() || !('send' in channel)) continue;
+      await channel.send(content);
+    } catch (error) {
+      console.error(`Failed to forward server event (${event.kind}) to guild ${guildId}:`, error);
     }
   }
 }
