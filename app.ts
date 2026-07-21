@@ -6,6 +6,7 @@ import { startConsoleStream, ChatMessage, ServerEvent } from './mcManager/consol
 import { broadcastDiscordMessageToMinecraft } from './mcManager/discordBroadcast.js';
 import { requestLinkFromMinecraft } from './mcManager/accountLinking.js';
 import { sanitizeMessageContent, sanitizeWebhookUsername, getPlayerHeadUrl } from './sanitize.js';
+import { buildOnlineMessage, listPlayers } from './mcManager/players.js';
 import { startPresenceRotation } from './presence.js';
 
 const token = process.env.DISCORD_TOKEN;
@@ -93,6 +94,18 @@ bot.on(Events.MessageCreate, async (message: Message) => {
   // "Minecraft Chat" webhook, so relayed Minecraft chat can't loop back.
   if (message.author.bot || message.webhookId) return;
   if (!message.content.trim()) return;
+
+  // "!online" — works in any channel, unlike the chat/event bridge below,
+  // which is scoped to the guild's configured bot channel.
+  if (/^!online\b/i.test(message.content)) {
+    try {
+      await message.reply(buildOnlineMessage(await listPlayers()));
+    } catch (error) {
+      console.error('!online: failed to fetch player list:', error);
+      await message.reply('Não consegui checar o servidor agora — tenta de novo daqui a pouco.');
+    }
+    return;
+  }
 
   const member = message.member;
   const displayName = member?.displayName ?? message.author.username;
