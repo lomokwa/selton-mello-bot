@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 // consoleStream.ts imports client.ts, which requires MC_MANAGER_API_URL/
 // USERNAME/PASSWORD to be set at import time — provided via .env.test
 // (see the "test" npm script, which loads it with dotenv-cli).
-import { isReplayedLine, parseChatLine } from '../mcManager/consoleStream.js';
+import { isReplayedLine, parseChatLine, parseServerEvent } from '../mcManager/consoleStream.js';
 
 describe('parseChatLine', () => {
   test('extracts username and message from a standard chat log line', () => {
@@ -60,5 +60,70 @@ describe('isReplayedLine', () => {
 
   test('returns false (assumes live) when the line has no parseable timestamp', () => {
     assert.equal(isReplayedLine('no timestamp here', Date.now()), false);
+  });
+});
+
+describe('parseServerEvent', () => {
+  test('detects a join', () => {
+    const line = '[14:32:01] [Server thread/INFO]: Steve joined the game';
+    assert.deepEqual(parseServerEvent(line), { kind: 'join', username: 'Steve' });
+  });
+
+  test('detects a leave', () => {
+    const line = '[14:32:01] [Server thread/INFO]: Steve left the game';
+    assert.deepEqual(parseServerEvent(line), { kind: 'leave', username: 'Steve' });
+  });
+
+  test('detects each advancement frame type (task/goal/challenge)', () => {
+    assert.deepEqual(
+      parseServerEvent('[14:32:01] [Server thread/INFO]: Steve has made the advancement [Stone Age]'),
+      { kind: 'advancement', username: 'Steve', detail: 'Stone Age' },
+    );
+    assert.deepEqual(
+      parseServerEvent('[14:32:01] [Server thread/INFO]: Steve has reached the goal [Sniper Duel]'),
+      { kind: 'advancement', username: 'Steve', detail: 'Sniper Duel' },
+    );
+    assert.deepEqual(
+      parseServerEvent('[14:32:01] [Server thread/INFO]: Steve has completed the challenge [How Did We Get Here?]'),
+      { kind: 'advancement', username: 'Steve', detail: 'How Did We Get Here?' },
+    );
+  });
+
+  test('detects common death message shapes', () => {
+    assert.deepEqual(
+      parseServerEvent('[14:32:01] [Server thread/INFO]: Steve was slain by Zombie'),
+      { kind: 'death', username: 'Steve', detail: 'Steve was slain by Zombie' },
+    );
+    assert.deepEqual(
+      parseServerEvent('[14:32:01] [Server thread/INFO]: Steve drowned'),
+      { kind: 'death', username: 'Steve', detail: 'Steve drowned' },
+    );
+    assert.deepEqual(
+      parseServerEvent('[14:32:01] [Server thread/INFO]: Steve fell from a high place'),
+      { kind: 'death', username: 'Steve', detail: 'Steve fell from a high place' },
+    );
+    assert.deepEqual(
+      parseServerEvent('[14:32:01] [Server thread/INFO]: Steve was blown up by Creeper'),
+      { kind: 'death', username: 'Steve', detail: 'Steve was blown up by Creeper' },
+    );
+  });
+
+  test('detects the server stopping and coming back up', () => {
+    assert.deepEqual(
+      parseServerEvent('[14:32:01] [Server thread/INFO]: Stopping the server'),
+      { kind: 'server_down' },
+    );
+    assert.deepEqual(
+      parseServerEvent('[14:32:01] [Server thread/INFO]: Done (23.456s)! For help, type "help"'),
+      { kind: 'server_up' },
+    );
+  });
+
+  test('returns null for a chat line (chat is handled separately by parseChatLine)', () => {
+    assert.equal(parseServerEvent('[14:32:01] [Server thread/INFO]: <Steve> hello world'), null);
+  });
+
+  test('returns null for an unrelated log line', () => {
+    assert.equal(parseServerEvent('[14:32:01] [Server thread/INFO]: Preparing level "world"'), null);
   });
 });
