@@ -2,11 +2,13 @@ import 'dotenv/config';
 import { Client, GatewayIntentBits, Events, Guild, Webhook, Collection, Message } from 'discord.js';
 import { resolveIntroChannelId, getGuildsWithBotChannel, getBotChannelId } from './db/guildSettings.js';
 import { commandsByName } from './commands/index.js';
-import { startConsoleStream, ChatMessage, ServerEvent } from './mcManager/consoleStream.js';
+import { startConsoleStream, ChatMessage, ServerEvent, sendCommand } from './mcManager/consoleStream.js';
 import { broadcastDiscordMessageToMinecraft } from './mcManager/discordBroadcast.js';
-import { requestLinkFromMinecraft } from './mcManager/accountLinking.js';
+import { requestLinkFromMinecraft, isValidMinecraftUsername } from './mcManager/accountLinking.js';
 import { sanitizeMessageContent, sanitizeWebhookUsername, getPlayerHeadUrl } from './sanitize.js';
-import { buildOnlineMessage, listPlayers } from './mcManager/players.js';
+import { isPlayerOp, buildOnlineMessage, listPlayers } from './mcManager/players.js';
+import { getLinkedMinecraftUsername } from './db/accountLinks.js';
+import { parseWhitelistCommand } from './whitelistCommand.js';
 import { startPresenceRotation } from './presence.js';
 
 const token = process.env.DISCORD_TOKEN;
@@ -104,6 +106,15 @@ bot.on(Events.MessageCreate, async (message: Message) => {
       console.error('!online: failed to fetch player list:', error);
       await message.reply('Não consegui checar o servidor agora — tenta de novo daqui a pouco.');
     }
+    return;
+  }
+
+  // "!whitelist <username>" — works in any channel, same "linked + op" gate
+  // as the /mc slash command (commands/mc.ts), reusing the exact same check
+  // so being able to run server commands and being able to whitelist someone
+  // stay governed by one rule instead of drifting apart.
+  if (/^!whitelist\b/i.test(message.content)) {
+    await handleWhitelistCommand(message);
     return;
   }
 
@@ -368,6 +379,48 @@ async function broadcastServerEvent(event: ServerEvent): Promise<void> {
       console.error(`Failed to forward server event (${event.kind}) to guild ${guildId}:`, error);
     }
   }
+}
+
+async function handleWhitelistCommand(message: Message): Promise<void> {
+  const targetUsername = parseWhitelistCommand(message.content);
+  if (!targetUsername) {
+    await message.reply('Uso: `!whitelist <usuario>`');
+    return;
+  }
+  if (!isValidMinecraftUsername(targetUsername)) {
+    await message.reply(`"${targetUsername}" não parece um nome de usuário válido do Minecraft.`);
+    return;
+  }
+
+  const minecraftUsername = getLinkedMinecraftUsername(message.author.id);
+  if (!minecraftUsername) {
+    await message.reply('Você precisa vincular uma conta Minecraft primeiro — use `/link start <usuario>`.');
+    return;
+  }
+
+  let isOp: boolean | null;
+  try {
+    isOp = await isPlayerOp(minecraftUsername);
+  } catch (error) {
+    console.error('!whitelist: failed to check op status:', error);
+    await message.reply('Não consegui checar o servidor agora — tenta de novo daqui a pouco.');
+    return;
+  }
+
+  if (!isOp) {
+    await message.reply(
+      `Sua conta vinculada (**${minecraftUsername}**) não é operadora do servidor, então você não pode usar esse comando.`,
+    );
+    return;
+  }
+
+  const sent = sendCommand(`whitelist add ${targetUsername}`);
+  console.log(`!whitelist: ${message.author.tag} (linked to ${minecraftUsername}, op) whitelisted "${targetUsername}"`);
+  await message.reply(
+    sent
+      ? `✅ **${targetUsername}** adicionado à whitelist por **${minecraftUsername}**.`
+      : 'Não consegui enviar o comando — a conexão com o servidor não está ativa agora.',
+  );
 }
 
 process.on('unhandledRejection', (error) => {
