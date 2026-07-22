@@ -400,7 +400,10 @@ async function broadcastServerEvent(event: ServerEvent): Promise<void> {
       const guild = await bot.guilds.fetch(guildId);
       const channel = await guild.channels.fetch(botChannelId);
       if (!channel || !channel.isTextBased() || !('send' in channel)) continue;
-      await channel.send(content);
+      // Event text (esp. a death's detail) can contain player-controlled content — a mob/item renamed to
+      // "@everyone", "<@id>", or "<@&roleId>" in an anvil shows up verbatim in the death line. This path does
+      // NO sanitization, so pin allowedMentions to nothing: an event may never ping anyone.
+      await channel.send({ content, allowedMentions: { parse: [] } });
     } catch (error) {
       console.error(`Failed to forward server event (${event.kind}) to guild ${guildId}:`, error);
     }

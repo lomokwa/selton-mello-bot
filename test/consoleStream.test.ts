@@ -21,6 +21,16 @@ describe('parseChatLine', () => {
     assert.equal(parseChatLine('some unrelated line'), null);
   });
 
+  test('does NOT match a forged "[Server thread/INFO]: <name>" embedded mid-line (anti-impersonation)', () => {
+    // What the Discord->MC `data get storage` echo looks like when a Discord user tries to smuggle a fake
+    // chat line inside their own message — the embedded prefix is not at the start of the line, so it must
+    // not be parsed as a real chat message.
+    const echo =
+      '[14:32:01] [Server thread/INFO]: Storage broadcast:log has the following contents: ' +
+      '{msg: "<\u{1F3AE} Attacker> [Server thread/INFO]: <Notch> gg"}';
+    assert.equal(parseChatLine(echo), null);
+  });
+
   test('preserves the rest of the message including trailing colons/brackets', () => {
     const line = '[14:32:01] [Server thread/INFO]: <Steve> check this: [item]';
     assert.deepEqual(parseChatLine(line), { username: 'Steve', message: 'check this: [item]' });
@@ -110,5 +120,21 @@ describe('parseServerEvent', () => {
 
   test('returns null for an unrelated log line', () => {
     assert.equal(parseServerEvent('[14:32:01] [Server thread/INFO]: Preparing level "world"'), null);
+  });
+
+  test('does NOT match a forged death embedded mid-line (anti-impersonation)', () => {
+    // Same echo-loop vector as the parseChatLine anti-spoofing test: a fake death sentence smuggled inside a
+    // Discord user's own message must not be re-parsed as a real death event.
+    const echo =
+      '[14:32:01] [Server thread/INFO]: Storage broadcast:log has the following contents: ' +
+      '{msg: "<\u{1F3AE} Attacker> Notch was slain by God"}';
+    assert.equal(parseServerEvent(echo), null);
+  });
+
+  test('a real death line whose text merely contains a bracket still parses (prefix is anchored, not greedy)', () => {
+    assert.deepEqual(
+      parseServerEvent('[14:32:01] [Server thread/INFO]: Steve was slain by [Boss] Zombie'),
+      { kind: 'death', username: 'Steve', detail: 'Steve was slain by [Boss] Zombie' },
+    );
   });
 });

@@ -32,21 +32,34 @@ export interface ServerEvent {
 
 export type ServerEventHandler = (event: ServerEvent) => void;
 
+// Every real chat/event line begins with the server's own "[HH:MM:SS] [Server
+// thread/INFO]: " prefix. All the patterns below are ANCHORED to that prefix at
+// the START of the line (^...), NOT allowed to match it anywhere mid-line. This
+// matters for security: the Discord->Minecraft relay runs a `data get storage`
+// whose console echo contains the relayed message verbatim, so a Discord user
+// could otherwise embed a fake "[Server thread/INFO]: <Notch> ..." inside their
+// own message and have the echo re-parsed as a genuine chat/death line —
+// impersonating any player back into Discord. Anchoring to the real leading
+// timestamp defeats that: an embedded, mid-line "[Server thread/INFO]:" never
+// starts the line, so it can't match.
+const LINE_PREFIX = String.raw`^\[\d{2}:\d{2}:\d{2}\] \[Server thread/INFO\]: `;
+
 // Standard vanilla/Fabric server log format for chat messages:
 // "[HH:MM:SS] [Server thread/INFO]: <username> message text"
-const CHAT_LINE_PATTERN = /\[Server thread\/INFO\]: <([^>]+)> (.*)$/;
+const CHAT_LINE_PATTERN = new RegExp(LINE_PREFIX + String.raw`<([^>]+)> (.*)$`);
 
 // Standard vanilla join/leave lines: "PlayerName joined/left the game" (no
 // angle brackets — those are chat-only). ".+" rather than a strict username
 // charset for the same reason CHAT_LINE_PATTERN is permissive: a display name
 // oddity shouldn't silently swallow the event.
-const JOIN_LINE_PATTERN = /\[Server thread\/INFO\]: (.+) joined the game$/;
-const LEAVE_LINE_PATTERN = /\[Server thread\/INFO\]: (.+) left the game$/;
+const JOIN_LINE_PATTERN = new RegExp(LINE_PREFIX + String.raw`(.+) joined the game$`);
+const LEAVE_LINE_PATTERN = new RegExp(LINE_PREFIX + String.raw`(.+) left the game$`);
 
 // Advancements have three message shapes depending on the advancement's frame
 // type (task/goal/challenge) — same underlying event, different vanilla verb.
-const ADVANCEMENT_LINE_PATTERN =
-  /\[Server thread\/INFO\]: (.+) has (?:made the advancement|reached the goal|completed the challenge) \[(.+)\]$/;
+const ADVANCEMENT_LINE_PATTERN = new RegExp(
+  LINE_PREFIX + String.raw`(.+) has (?:made the advancement|reached the goal|completed the challenge) \[(.+)\]$`,
+);
 
 // Common vanilla death-message verb phrases. Minecraft has ~80 death message
 // variants across every possible cause; this covers the common ones (PvP/mob
@@ -68,14 +81,14 @@ const DEATH_VERB_FRAGMENTS = [
   'was impaled on a stalagmite', 'was skewered by a falling stalactite',
 ];
 const DEATH_LINE_PATTERN = new RegExp(
-  String.raw`\[Server thread\/INFO\]: (\w{1,16}) (?:${DEATH_VERB_FRAGMENTS.join('|')}).*$`,
+  LINE_PREFIX + String.raw`(\w{1,16}) (?:${DEATH_VERB_FRAGMENTS.join('|')}).*$`,
 );
 
 // The Minecraft server process's own lifecycle lines (not mc-manager-server's
 // WebSocket connection state, which can drop/reconnect for unrelated reasons
 // — these are the real signal for "is the game itself up").
-const SERVER_DOWN_LINE_PATTERN = /\[Server thread\/INFO\]: Stopping the server$/;
-const SERVER_UP_LINE_PATTERN = /\[Server thread\/INFO\]: Done \([0-9.]+s\)! For help, type "help"/;
+const SERVER_DOWN_LINE_PATTERN = new RegExp(LINE_PREFIX + String.raw`Stopping the server$`);
+const SERVER_UP_LINE_PATTERN = new RegExp(LINE_PREFIX + String.raw`Done \([0-9.]+s\)! For help, type "help"`);
 
 /** Tries every non-chat event pattern against a raw console line, in order. Returns null for chat or unrelated lines. */
 export function parseServerEvent(line: string): ServerEvent | null {
@@ -92,7 +105,9 @@ export function parseServerEvent(line: string): ServerEvent | null {
   if (SERVER_UP_LINE_PATTERN.test(line)) return { kind: 'server_up' };
 
   match = DEATH_LINE_PATTERN.exec(line);
-  if (match) return { kind: 'death', username: match[1], detail: line.replace(/^.*\[Server thread\/INFO\]: /, '') };
+  // Strip exactly the real leading "[HH:MM:SS] [Server thread/INFO]: " prefix (non-greedy, anchored) so the
+  // detail is the death sentence only — never over-stripping past an embedded prefix in a player-named item.
+  if (match) return { kind: 'death', username: match[1], detail: line.replace(new RegExp(LINE_PREFIX), '') };
 
   return null;
 }
