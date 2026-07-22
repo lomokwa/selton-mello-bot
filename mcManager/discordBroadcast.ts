@@ -50,6 +50,24 @@ export function buildReplySnippet(content: string): string {
   return flat.length > REPLY_SNIPPET_MAX_LENGTH ? `${flat.slice(0, REPLY_SNIPPET_MAX_LENGTH)}...` : flat;
 }
 
+/**
+ * Replaces raw Discord user-mention tokens (`<@id>`, or the older `<@!id>` nickname-mention form) in `content`
+ * with a readable `@displayName`. Discord's own `message.content` never resolves these for you — that only
+ * happens client-side in the Discord app — so without this, a mention relayed to Minecraft chat shows the
+ * literal numeric ID instead of the person's name.
+ *
+ * Takes a plain `resolveDisplayName` lookup instead of a discord.js `Message` directly so this stays a pure,
+ * easily unit-testable function; the caller supplies the lookup from the real message's `mentions` collection.
+ * A mention that can't be resolved (e.g. `resolveDisplayName` returns undefined) is left exactly as-is rather
+ * than guessed at.
+ */
+export function resolveMentions(content: string, resolveDisplayName: (userId: string) => string | undefined): string {
+  return content.replace(/<@!?(\d+)>/g, (raw, userId: string) => {
+    const name = resolveDisplayName(userId);
+    return name ? `@${name}` : raw;
+  });
+}
+
 // An SNBT string literal: wrap in quotes and escape the two special characters.
 function snbt(s: string): string {
   return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;

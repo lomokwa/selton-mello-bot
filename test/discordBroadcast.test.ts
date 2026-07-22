@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildBroadcastCommands, buildReplySnippet } from '../mcManager/discordBroadcast.js';
+import { buildBroadcastCommands, buildReplySnippet, resolveMentions } from '../mcManager/discordBroadcast.js';
 
 describe('buildBroadcastCommands', () => {
   test('builds the tellraw + data modify + data get command sequence', () => {
@@ -130,5 +130,29 @@ describe('buildReplySnippet', () => {
   test('falls back to a placeholder for empty/whitespace-only content (e.g. an image-only message)', () => {
     assert.equal(buildReplySnippet(''), '(sem texto)');
     assert.equal(buildReplySnippet('   '), '(sem texto)');
+  });
+});
+
+describe('resolveMentions', () => {
+  test('replaces a <@id> mention with "@displayName"', () => {
+    assert.equal(resolveMentions('oi <@123>, tudo bem?', (id) => (id === '123' ? 'Ant_Redstone' : undefined)),
+      'oi @Ant_Redstone, tudo bem?');
+  });
+
+  test('replaces the older <@!id> nickname-mention form the same way', () => {
+    assert.equal(resolveMentions('oi <@!123>!', (id) => (id === '123' ? 'Ant_Redstone' : undefined)), 'oi @Ant_Redstone!');
+  });
+
+  test('resolves multiple distinct mentions in one message', () => {
+    const names: Record<string, string> = { '1': 'Alice', '2': 'Bob' };
+    assert.equal(resolveMentions('<@1> e <@2> chegaram', (id) => names[id]), '@Alice e @Bob chegaram');
+  });
+
+  test('leaves an unresolvable mention untouched instead of guessing', () => {
+    assert.equal(resolveMentions('quem é <@999>?', () => undefined), 'quem é <@999>?');
+  });
+
+  test('leaves plain text with no mentions unchanged', () => {
+    assert.equal(resolveMentions('nenhuma mencao aqui', () => 'should not be called'), 'nenhuma mencao aqui');
   });
 });
