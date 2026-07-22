@@ -40,4 +40,4 @@ jobs:
               -o ProxyCommand="cloudflared access ssh --hostname ${{ secrets.HOMELAB_HOST }}" \
               -i ~/.ssh/key \
               ${{ secrets.HOMELAB_USER }}@${{ secrets.HOMELAB_HOST }} \
-              "cd /home/lomokwa/homelab/selton-mello-bot && git pull origin main && npm ci && npm run build && mkdir -p data && sudo systemctl restart selton-mello-bot"
+              "cd /home/lomokwa/homelab/selton-mello-bot && git fetch origin main && git reset --hard origin/main && npm ci && npm run build && mkdir -p data && sudo systemctl restart selton-mello-bot"
