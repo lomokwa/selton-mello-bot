@@ -35,7 +35,6 @@ export type ServerEventHandler = (event: ServerEvent) => void;
 // Standard vanilla/Fabric server log format for chat messages:
 // "[HH:MM:SS] [Server thread/INFO]: <username> message text"
 const CHAT_LINE_PATTERN = /\[Server thread\/INFO\]: <([^>]+)> (.*)$/;
-const LOG_TIMESTAMP_PATTERN = /^\[(\d{2}):(\d{2}):(\d{2})\]/;
 
 // Standard vanilla join/leave lines: "PlayerName joined/left the game" (no
 // angle brackets — those are chat-only). ".+" rather than a strict username
@@ -100,39 +99,24 @@ export function parseServerEvent(line: string): ServerEvent | null {
 
 // mc-manager-server's console hub replays its ~200-line history buffer to
 // every new WebSocket subscriber, so on (re)connect we'd otherwise re-post old
-// chat as if it just happened. Replayed lines keep their original timestamp,
-// which will always be at/before the moment we opened this connection — live
-// lines are always produced after that point. A small clock-skew allowance
-// covers minor drift between the bot's clock and the Minecraft server's clock.
+// chat as if it just happened. The history is flushed as an immediate burst the
+// instant the socket opens; live lines only arrive later, whenever a player
+// actually does something. So we drop everything received within a short window
+// after connecting — that swallows the whole replay burst and nothing else.
 //
-// The Minecraft server logs timestamps in its own local time (commonly UTC on
-// headless/homelab setups), not the bot's local timezone, so we parse them as
-// UTC rather than using Date's local-time constructor.
-const CLOCK_SKEW_TOLERANCE_MS = 2_000;
+// This deliberately keys off when WE RECEIVE the line, NOT the timestamp printed
+// in the line: the Minecraft server logs times in its own local timezone, and
+// the bot has no reliable way to know what that is from a bare "[HH:MM:SS]".
+// The previous timestamp-based filter assumed the server logged UTC and silently
+// dropped EVERY live line as "replayed" on any server whose clock wasn't UTC
+// (e.g. UTC-3), which is exactly why Minecraft chat stopped reaching Discord.
+// Receipt-time is timezone-proof. The only cost: a chat line sent in the first
+// couple of seconds right after a (re)connect is skipped — rare and harmless
+// next to losing all chat.
+const REPLAY_WINDOW_MS = 2_500;
 
-export function isReplayedLine(line: string, connectedAt: number): boolean {
-  const match = LOG_TIMESTAMP_PATTERN.exec(line);
-  if (!match) return false; // no timestamp to compare against — assume it's live
-
-  const [, hours, minutes, seconds] = match;
-  const connectedAtDate = new Date(connectedAt);
-  let lineTimeMs = Date.UTC(
-    connectedAtDate.getUTCFullYear(),
-    connectedAtDate.getUTCMonth(),
-    connectedAtDate.getUTCDate(),
-    Number(hours),
-    Number(minutes),
-    Number(seconds),
-  );
-
-  // If the line's time-of-day appears to be more than 12h ahead of the
-  // connection time, it's almost certainly from just before a UTC day
-  // rollover (e.g. connected at 00:01 UTC, line stamped 23:59 the prior day).
-  if (lineTimeMs - connectedAt > 12 * 60 * 60 * 1000) {
-    lineTimeMs -= 24 * 60 * 60 * 1000;
-  }
-
-  return lineTimeMs <= connectedAt - CLOCK_SKEW_TOLERANCE_MS;
+export function isWithinReplayWindow(receivedAt: number, connectedAt: number): boolean {
+  return receivedAt - connectedAt < REPLAY_WINDOW_MS;
 }
 
 export function parseChatLine(line: string): ChatMessage | null {
@@ -189,7 +173,7 @@ async function connect(onChatMessage: ChatMessageHandler, onServerEvent?: Server
 
   socket.on('message', (data) => {
     const line = data.toString();
-    if (isReplayedLine(line, connectedAt)) return;
+    if (isWithinReplayWindow(Date.now(), connectedAt)) return; // swallow the on-connect history-replay burst
 
     const chat = parseChatLine(line);
     if (chat) {
