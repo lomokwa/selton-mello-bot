@@ -252,16 +252,19 @@ const LINK_TRIGGER = '!link';
 // digits, underscores, periods; 2-32 chars).
 const MENTION_PATTERN = /@([a-z0-9_.]{2,32})/gi;
 
-// Resolves "@name" tokens in Minecraft chat text into real Discord mentions
-// for the given guild, so players can ping someone by typing e.g. "@lomokwa".
-// Uses the REST member-search endpoint (no privileged Members intent needed)
-// and only pings on an exact username/nickname match to avoid mis-pinging the
-// wrong person off a fuzzy prefix match.
-async function resolveMinecraftMentions(guild: Guild, text: string): Promise<string> {
+// Resolves "@name" tokens in Minecraft chat text into real Discord mentions for the given guild, so players can
+// ping someone by typing e.g. "@lomokwa". Uses the REST member-search endpoint (no privileged Members intent
+// needed) and only pings on an exact username/nickname match to avoid mis-pinging off a fuzzy prefix match.
+// Returns the rewritten text AND the exact user IDs it resolved, so the caller can pin allowedMentions to only
+// those — a "<@123>" a player types raw then renders but never pings. MUST run on the RAW message, before
+// sanitize escapes "_": MENTION_PATTERN's char class includes "_", so a pre-escaped "@Ant\_Redstone" would
+// otherwise truncate to "@Ant" and fail (or ping the wrong person). Underscore usernames are everywhere here.
+async function resolveMinecraftMentions(guild: Guild, text: string): Promise<{ text: string; userIds: string[] }> {
   const names = new Set([...text.matchAll(MENTION_PATTERN)].map((match) => match[1]));
-  if (names.size === 0) return text;
+  if (names.size === 0) return { text, userIds: [] };
 
   const mentionsByName = new Map<string, string>();
+  const userIds: string[] = [];
   await Promise.all(
     [...names].map(async (name) => {
       try {
@@ -273,21 +276,26 @@ async function resolveMinecraftMentions(guild: Guild, text: string): Promise<str
             member.displayName.toLowerCase() === name.toLowerCase())
         ) {
           mentionsByName.set(name.toLowerCase(), `<@${member.id}>`);
+          userIds.push(member.id);
         }
       } catch (error) {
         console.error(`Failed to resolve Minecraft "@${name}" mention in guild ${guild.id}:`, error);
       }
     }),
   );
-  if (mentionsByName.size === 0) return text;
+  if (mentionsByName.size === 0) return { text, userIds: [] };
 
-  return text.replace(MENTION_PATTERN, (full, name: string) => mentionsByName.get(name.toLowerCase()) ?? full);
+  const replaced = text.replace(MENTION_PATTERN, (full, name: string) => mentionsByName.get(name.toLowerCase()) ?? full);
+  return { text: replaced, userIds };
 }
 
 // Matches ":name:" tokens a player can type in Minecraft chat to reference a
 // custom Discord emoji by name (e.g. ":Pepega:"), using Discord's own custom
-// emoji name character set (letters, digits, underscores; 2-32 chars).
-const EMOJI_NAME_PATTERN = /:([a-zA-Z0-9_]{2,32}):/g;
+// emoji name character set (letters, digits, underscores; 2-32 chars). The
+// trailing "(?!\d)" makes it NOT match the inner ":name:" of an already-complete
+// "<:name:id>" token (whose second colon is followed by the numeric id), so a
+// player-pasted emoji isn't double-wrapped into "<<:name:localId>id>".
+const EMOJI_NAME_PATTERN = /:([a-zA-Z0-9_]{2,32}):(?!\d)/g;
 
 // Resolves ":name:" tokens into real "<:name:id>" (or "<a:name:id>" for
 // animated) custom emoji syntax for the given guild, so players don't need to
@@ -336,7 +344,6 @@ async function broadcastMinecraftChatMessage(chat: ChatMessage): Promise<void> {
   }
 
   const username = sanitizeWebhookUsername(chat.username);
-  const content = sanitizeMessageContent(chat.message);
 
   for (const { guildId, botChannelId } of getGuildsWithBotChannel()) {
     try {
@@ -345,19 +352,29 @@ async function broadcastMinecraftChatMessage(chat: ChatMessage): Promise<void> {
       if (!channel || !channel.isTextBased() || !('send' in channel)) continue;
 
       const webhook = await getOrCreateChatWebhook(channel);
-      const relayedContent = await resolveMinecraftEmojiNames(guild, await resolveMinecraftMentions(guild, content));
+      // Resolve @mentions and :emoji: on the RAW message FIRST (so underscore usernames survive), then escape
+      // markdown -- sanitizeMessageContent protects the resolved <@id>/<:name:id> tokens. Pin allowedMentions to
+      // exactly the users we resolved: a deliberate "@name" pings, but no @everyone/@here/role and no raw
+      // "<@id>" a player typed can. (guild-specific, so it's recomputed per guild.)
+      const { text: mentioned, userIds } = await resolveMinecraftMentions(guild, chat.message);
+      const relayedContent = sanitizeMessageContent(await resolveMinecraftEmojiNames(guild, mentioned));
+      const allowedMentions = { users: userIds, parse: [] as never[] };
       let relayedMessage;
       if (webhook) {
         relayedMessage = await webhook.send({
           content: relayedContent,
           username,
           avatarURL: getPlayerHeadUrl(chat.username),
+          allowedMentions,
         });
       } else {
         // Fallback if the bot lacks Manage Webhooks permission in this channel.
         // Unlike the webhook path, this is a regular message where markdown renders,
         // so the username needs escaping here too.
-        relayedMessage = await channel.send(`**${sanitizeMessageContent(username)}**: ${relayedContent}`);
+        relayedMessage = await channel.send({
+          content: `**${sanitizeMessageContent(username)}**: ${relayedContent}`,
+          allowedMentions,
+        });
       }
 
       // Reply to the just-relayed player message so the "Selton Mello" reply

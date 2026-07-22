@@ -41,6 +41,18 @@ describe('sanitizeMessageContent', () => {
       '<:PogU:531255068251521024><:PogU:531255068251521024>',
     );
   });
+
+  test('leaves a resolved user-mention token <@id> untouched so it still renders', () => {
+    // app.ts resolves "@name" -> "<@id>" BEFORE calling sanitize; the ">" must not be escaped or the mention
+    // would render as literal "<@id\>" text and never ping. (Whether it PINGS is gated separately by an
+    // allowedMentions allow-list on send().)
+    assert.equal(sanitizeMessageContent('hi <@123456789012345678>'), 'hi <@123456789012345678>');
+    assert.equal(sanitizeMessageContent('<@!123456789012345678> yo'), '<@!123456789012345678> yo');
+  });
+
+  test('still escapes a bogus "<@notanid>" that is not a real mention token', () => {
+    assert.equal(sanitizeMessageContent('<@notanid>'), '<@notanid\\>');
+  });
 });
 
 describe('sanitizeWebhookUsername', () => {
