@@ -4,11 +4,14 @@
  * in discord.js client setup / bot.login() side effects.
  */
 
-// Discord's custom emoji syntax: <:name:id> or <a:name:id> for animated ones.
-// Matches Discord's own constraints (2-32 word chars for the name, a numeric
-// snowflake ID) so players can reference real custom emoji from Minecraft
-// chat (e.g. typing "<:PogU:531255068251521024>") and have them render.
-const CUSTOM_EMOJI_PATTERN = /<a?:\w{2,32}:\d{17,20}>/g;
+// Discord tokens that must survive the ">" markdown-escaping below intact, so they still render as a real
+// emoji / mention instead of literal "<...\>" text:
+//   - custom emoji  <:name:id> / <a:name:id>  (2-32 word chars, a 17-20 digit snowflake)
+//   - user mention  <@id> / <@!id>            (app.ts resolves a Minecraft "@name" into one of these BEFORE
+//                                              calling sanitize, so they must be protected here)
+// NOTE: protecting a token here only affects RENDERING — the actual ping is still gated by an explicit
+// allowedMentions allow-list on send(), so a token surviving here never widens who gets pinged.
+const PROTECTED_TOKEN_PATTERN = /<a?:\w{2,32}:\d{17,20}>|<@!?\d{17,20}>/g;
 
 // Escapes Discord markdown and mention triggers in untrusted chat message text
 // (Minecraft player messages) so players can't format text or ping @everyone/@here.
@@ -16,7 +19,7 @@ const CUSTOM_EMOJI_PATTERN = /<a?:\w{2,32}:\d{17,20}>/g;
 // render as real emoji instead of literal "<:name:id\>" text.
 export function sanitizeMessageContent(text: string): string {
   const emojis: string[] = [];
-  const withPlaceholders = text.replace(CUSTOM_EMOJI_PATTERN, (match) => {
+  const withPlaceholders = text.replace(PROTECTED_TOKEN_PATTERN, (match) => {
     emojis.push(match);
     return `\u0000${emojis.length - 1}\u0000`;
   });
