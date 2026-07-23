@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildBroadcastCommands, buildReplySnippet, resolveMentions } from '../mcManager/discordBroadcast.js';
+import { buildBroadcastCommands, buildReplySnippet, resolveMentions, appendAttachmentUrls } from '../mcManager/discordBroadcast.js';
 
 describe('buildBroadcastCommands', () => {
   test('builds the tellraw + data modify + data get command sequence', () => {
@@ -130,6 +130,33 @@ describe('buildReplySnippet', () => {
   test('falls back to a placeholder for empty/whitespace-only content (e.g. an image-only message)', () => {
     assert.equal(buildReplySnippet(''), '(sem texto)');
     assert.equal(buildReplySnippet('   '), '(sem texto)');
+  });
+});
+
+describe('appendAttachmentUrls', () => {
+  test('leaves content unchanged when there are no attachments', () => {
+    assert.equal(appendAttachmentUrls('hello there', []), 'hello there');
+  });
+
+  test('appends a single attachment URL to existing text', () => {
+    assert.equal(
+      appendAttachmentUrls('look at this', ['https://cdn.discordapp.com/attachments/1/2/cat.png']),
+      'look at this https://cdn.discordapp.com/attachments/1/2/cat.png',
+    );
+  });
+
+  test('uses just the URL when the message has no text (image-only message)', () => {
+    assert.equal(
+      appendAttachmentUrls('', ['https://cdn.discordapp.com/attachments/1/2/cat.png']),
+      'https://cdn.discordapp.com/attachments/1/2/cat.png',
+    );
+  });
+
+  test('joins multiple attachment URLs with the text', () => {
+    assert.equal(
+      appendAttachmentUrls('two pics', ['https://cdn/1.png', 'https://cdn/2.png']),
+      'two pics https://cdn/1.png https://cdn/2.png',
+    );
   });
 });
 

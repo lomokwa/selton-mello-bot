@@ -3,7 +3,7 @@ import { Client, GatewayIntentBits, Events, Guild, Webhook, Collection, Message,
 import { resolveIntroChannelId, getGuildsWithBotChannel, getBotChannelId } from './db/guildSettings.js';
 import { commandsByName } from './commands/index.js';
 import { startConsoleStream, ChatMessage, ServerEvent, sendCommand } from './mcManager/consoleStream.js';
-import { broadcastDiscordMessageToMinecraft, buildReplySnippet, resolveMentions, ReplyContext } from './mcManager/discordBroadcast.js';
+import { broadcastDiscordMessageToMinecraft, buildReplySnippet, resolveMentions, appendAttachmentUrls, ReplyContext } from './mcManager/discordBroadcast.js';
 import { requestLinkFromMinecraft, isValidMinecraftUsername } from './mcManager/accountLinking.js';
 import { sanitizeMessageContent, sanitizeWebhookUsername, getPlayerHeadUrl } from './sanitize.js';
 import { isPlayerOp, buildOnlineMessage, listPlayers } from './mcManager/players.js';
@@ -95,7 +95,8 @@ bot.on(Events.MessageCreate, async (message: Message) => {
   // Ignore bots and webhooks — critically, this also ignores our own
   // "Minecraft Chat" webhook, so relayed Minecraft chat can't loop back.
   if (message.author.bot || message.webhookId) return;
-  if (!message.content.trim()) return;
+  // An image/video/file with no caption has empty content -- don't bail out on those, or they relay nothing.
+  if (!message.content.trim() && message.attachments.size === 0) return;
 
   // "!online" — works in any channel, unlike the chat/event bridge below,
   // which is scoped to the guild's configured bot channel.
@@ -145,9 +146,10 @@ bot.on(Events.MessageCreate, async (message: Message) => {
   if (message.channelId !== botChannelId) return;
 
   const replyTo = await resolveReplyContext(message);
-  const content = resolveMentions(message.content, (id) => mentionDisplayName(message, id));
+  const withMentions = resolveMentions(message.content, (id) => mentionDisplayName(message, id));
+  const content = appendAttachmentUrls(withMentions, [...message.attachments.values()].map((a) => a.url));
 
-  console.log(`Relaying Discord message from ${message.author.tag} to Minecraft: ${message.content}`);
+  console.log(`Relaying Discord message from ${message.author.tag} to Minecraft: ${content}`);
   try {
     broadcastDiscordMessageToMinecraft(displayName, content, nameColor, isDevMode, replyTo);
   } catch (error) {
