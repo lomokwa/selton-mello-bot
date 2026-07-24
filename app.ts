@@ -193,6 +193,14 @@ const chatWebhooks = new Map<string, Webhook>();
 const webhookRetryAfter = new Map<string, number>();
 const WEBHOOK_RETRY_COOLDOWN_MS = 5 * 60 * 1000;
 
+// Discord's numeric API error code for "that webhook no longer exists" (e.g. an admin deleted it from
+// Discord's side, outside the bot entirely). Distinguishing this from other send failures matters: it's the
+// one case where evicting the cached Webhook and retrying is actually useful, rather than just noise.
+const UNKNOWN_WEBHOOK_ERROR_CODE = 10015;
+function isUnknownWebhookError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && 'code' in error && (error as { code: unknown }).code === UNKNOWN_WEBHOOK_ERROR_CODE;
+}
+
 // Finds (or creates) the webhook used to post Minecraft chat messages with a
 // per-player display name and avatar, rather than a generic bot message.
 async function getOrCreateChatWebhook(channel: unknown): Promise<Webhook | null> {
@@ -203,7 +211,10 @@ async function getOrCreateChatWebhook(channel: unknown): Promise<Webhook | null>
   if (cached) return cached;
 
   const retryAfter = webhookRetryAfter.get(channelId);
-  if (retryAfter && Date.now() < retryAfter) return null;
+  if (retryAfter) {
+    if (Date.now() < retryAfter) return null;
+    webhookRetryAfter.delete(channelId); // cooldown elapsed -- stop carrying this entry forever
+  }
 
   if (!('fetchWebhooks' in channel) || !('createWebhook' in channel)) {
     console.error(`Channel ${channelId} does not support webhooks`);
@@ -297,6 +308,22 @@ async function resolveMinecraftMentions(guild: Guild, text: string): Promise<{ t
 // player-pasted emoji isn't double-wrapped into "<<:name:localId>id>".
 const EMOJI_NAME_PATTERN = /:([a-zA-Z0-9_]{2,32}):(?!\d)/g;
 
+// Custom emoji lists change rarely, so a fetch-with-no-id (which always hits the REST endpoint fresh, unlike
+// looking up a known id from the client's own cache) is cached per guild for a few minutes -- every Minecraft
+// chat message containing a ":name:" token used to trigger a full re-fetch of the guild's ENTIRE emoji list.
+const EMOJI_CACHE_TTL_MS = 5 * 60 * 1000;
+const emojiCache = new Map<string, { emojis: Awaited<ReturnType<Guild['emojis']['fetch']>>; fetchedAt: number }>();
+
+async function fetchGuildEmojis(guild: Guild): Promise<Awaited<ReturnType<Guild['emojis']['fetch']>>> {
+  const cached = emojiCache.get(guild.id);
+  if (cached && Date.now() - cached.fetchedAt < EMOJI_CACHE_TTL_MS) {
+    return cached.emojis;
+  }
+  const emojis = await guild.emojis.fetch();
+  emojiCache.set(guild.id, { emojis, fetchedAt: Date.now() });
+  return emojis;
+}
+
 // Resolves ":name:" tokens into real "<:name:id>" (or "<a:name:id>" for
 // animated) custom emoji syntax for the given guild, so players don't need to
 // know/type the emoji's numeric ID. Uses the REST emoji-list endpoint, which
@@ -307,7 +334,7 @@ async function resolveMinecraftEmojiNames(guild: Guild, text: string): Promise<s
 
   let emojis;
   try {
-    emojis = await guild.emojis.fetch();
+    emojis = await fetchGuildEmojis(guild);
   } catch (error) {
     console.error(`Failed to fetch custom emoji for guild ${guild.id}:`, error);
     return text;
@@ -359,22 +386,33 @@ async function broadcastMinecraftChatMessage(chat: ChatMessage): Promise<void> {
       const { text: mentioned, userIds } = await resolveMinecraftMentions(guild, chat.message);
       const relayedContent = sanitizeMessageContent(await resolveMinecraftEmojiNames(guild, mentioned));
       const allowedMentions = { users: userIds, parse: [] as never[] };
-      let relayedMessage;
-      if (webhook) {
-        relayedMessage = await webhook.send({
-          content: relayedContent,
-          username,
-          avatarURL: getPlayerHeadUrl(chat.username),
-          allowedMentions,
-        });
-      } else {
-        // Fallback if the bot lacks Manage Webhooks permission in this channel.
-        // Unlike the webhook path, this is a regular message where markdown renders,
-        // so the username needs escaping here too.
-        relayedMessage = await channel.send({
+      // Fallback if the bot lacks Manage Webhooks permission in this channel (or the cached webhook turned out
+      // to be stale below). Unlike the webhook path, this is a regular message where markdown renders, so the
+      // username needs escaping here too.
+      const sendPlain = () =>
+        channel.send({
           content: `**${sanitizeMessageContent(username)}**: ${relayedContent}`,
           allowedMentions,
         });
+      let relayedMessage;
+      if (webhook) {
+        try {
+          relayedMessage = await webhook.send({
+            content: relayedContent,
+            username,
+            avatarURL: getPlayerHeadUrl(chat.username),
+            allowedMentions,
+          });
+        } catch (error) {
+          if (!isUnknownWebhookError(error)) throw error;
+          // The webhook was deleted from Discord's side (e.g. by a server admin), out from under the cache --
+          // evict it so the NEXT message recreates one, and still deliver THIS message via the plain fallback
+          // instead of dropping it (audit finding B3: this used to just log-and-drop every message forever).
+          chatWebhooks.delete(channel.id);
+          relayedMessage = await sendPlain();
+        }
+      } else {
+        relayedMessage = await sendPlain();
       }
 
       // Reply to the just-relayed player message so the "Selton Mello" reply

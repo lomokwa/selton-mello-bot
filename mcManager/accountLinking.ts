@@ -109,7 +109,38 @@ interface PendingLink {
 // in-game whisper) is what proves ownership either way. Kept in-memory (like
 // app.ts's chatWebhooks cache) since codes are short-lived — losing pending
 // requests on a bot restart just means the player starts over.
+//
+// A code that's never confirmed used to sit here forever (audit finding B2):
+// nothing ever swept an expired-but-unconfirmed entry, and the in-game "!link"
+// trigger had no cooldown at all, so repeatedly typing it in chat grew this map
+// (and spammed a tellraw per message) without bound. Fixed three ways: a lazy
+// sweep on every call below, a cooldown on the ungated in-game trigger, and
+// capping at one live code per username (a fresh request replaces any of that
+// same player's still-pending code instead of piling up another one).
 const pendingLinks = new Map<string, PendingLink>();
+
+/** Drops every pending code whose TTL has passed. Cheap (bounded by recent request volume) and called from
+ *  every entry point below, so an abandoned code never lingers past its own expiry. */
+function sweepExpiredLinks(): void {
+  const now = Date.now();
+  for (const [code, pending] of pendingLinks) {
+    if (now > pending.expiresAt) pendingLinks.delete(code);
+  }
+}
+
+/** Removes any still-pending code already issued for this username, so a repeated request replaces it
+ *  instead of accumulating a second live code for the same player. */
+function dropExistingCodeFor(minecraftUsername: string): void {
+  for (const [code, pending] of pendingLinks) {
+    if (pending.minecraftUsername === minecraftUsername) pendingLinks.delete(code);
+  }
+}
+
+// Per-player cooldown for the in-game "!link" trigger specifically: unlike Discord's `/link start` (already
+// naturally throttled by Discord's own slash-command interaction handling), typing "!link" in Minecraft chat
+// had zero rate limit -- spamming it created one pending code (and one tellraw) per message.
+const MINECRAFT_LINK_COOLDOWN_MS = 60 * 1000;
+const lastMinecraftLinkRequest = new Map<string, number>();
 
 export type StartLinkResult =
   | { ok: true }
@@ -124,6 +155,7 @@ export type StartLinkResult =
  * then whispers a one-time code to the player in-game.
  */
 export function startAccountLink(discordUserId: string, minecraftUsername: string): StartLinkResult {
+  sweepExpiredLinks();
   if (!isValidMinecraftUsername(minecraftUsername)) {
     return { ok: false, reason: 'invalid-username' };
   }
@@ -143,13 +175,14 @@ export function startAccountLink(discordUserId: string, minecraftUsername: strin
     return { ok: false, reason: 'whisper-failed' };
   }
 
+  dropExistingCodeFor(minecraftUsername);
   pendingLinks.set(code, { minecraftUsername, expiresAt: Date.now() + CODE_TTL_MS });
   return { ok: true };
 }
 
 export type RequestLinkFromMinecraftResult =
   | { ok: true }
-  | { ok: false; reason: 'already-linked' | 'whisper-failed' };
+  | { ok: false; reason: 'already-linked' | 'whisper-failed' | 'on-cooldown' };
 
 /**
  * Kicks off account linking from Minecraft (player types `!link` in chat —
@@ -159,8 +192,20 @@ export type RequestLinkFromMinecraftResult =
  * against, so an already-linked account is rejected outright rather than
  * allowed to "relink" — the player has no way to specify a different Discord
  * account from in-game, so they're pointed at `/link unlink` instead.
+ *
+ * Rate-limited per username (see {@link MINECRAFT_LINK_COOLDOWN_MS}) — this trigger is a bare chat message
+ * with no Discord-side interaction throttle behind it, so without this a player spamming "!link" could mint
+ * a fresh pending code (and tellraw) on every single message.
  */
 export function requestLinkFromMinecraft(minecraftUsername: string): RequestLinkFromMinecraftResult {
+  sweepExpiredLinks();
+
+  const now = Date.now();
+  const last = lastMinecraftLinkRequest.get(minecraftUsername);
+  if (last !== undefined && now - last < MINECRAFT_LINK_COOLDOWN_MS) {
+    return { ok: false, reason: 'on-cooldown' };
+  }
+
   const existingOwner = getDiscordUserIdForMinecraftUsername(minecraftUsername);
   if (existingOwner) {
     sendCommand(buildAlreadyLinkedWhisperCommand(minecraftUsername));
@@ -173,6 +218,8 @@ export function requestLinkFromMinecraft(minecraftUsername: string): RequestLink
     return { ok: false, reason: 'whisper-failed' };
   }
 
+  lastMinecraftLinkRequest.set(minecraftUsername, now);
+  dropExistingCodeFor(minecraftUsername);
   pendingLinks.set(code, { minecraftUsername, expiresAt: Date.now() + CODE_TTL_MS });
   return { ok: true };
 }

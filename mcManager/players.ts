@@ -22,8 +22,25 @@ interface PlayersResponse {
   error?: string;
 }
 
-/** Fetches the full player list (everyone who's ever joined) from mc-manager-server. */
+// Every caller of listPlayers() (the presence rotation every 30s, "!online", "/mc"'s op check, "!whitelist"'s
+// op check) used to hit mc-manager-server fresh every time -- and on that side, GetOnlinePlayers doesn't just
+// read a file: it runs a REAL "list" command against the Minecraft server console and parses the reply (see
+// mc-manager's services/minecraft.go). A 30s presence poll alone was ~2,880 of those a day for a status line
+// nobody's watching that closely. A short cache shared across every caller here cuts that by roughly the same
+// factor these call sites overlap, with no visible staleness cost (audit finding G1/B4 -- this is the bot-side
+// half; the server-side cache is mc-manager's own fix).
+const CACHE_TTL_MS = 10 * 1000;
+let cachedPlayers: Player[] | null = null;
+let cachedAt = 0;
+
+/** Fetches the full player list (everyone who's ever joined) from mc-manager-server, cached for a few seconds
+ *  so a burst of calls (presence + a chat command landing close together) only pays for one real fetch. */
 export async function listPlayers(): Promise<Player[]> {
+  const now = Date.now();
+  if (cachedPlayers !== null && now - cachedAt < CACHE_TTL_MS) {
+    return cachedPlayers;
+  }
+
   const token = await getToken();
   const response = await fetch(`${getApiUrl()}/api/players`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -34,6 +51,8 @@ export async function listPlayers(): Promise<Player[]> {
     throw new Error(`mc-manager: failed to list players: ${body.error ?? response.statusText}`);
   }
 
+  cachedPlayers = body.data;
+  cachedAt = now;
   return body.data;
 }
 
