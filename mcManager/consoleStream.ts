@@ -89,6 +89,8 @@ const DEATH_LINE_PATTERN = new RegExp(
 // — these are the real signal for "is the game itself up").
 const SERVER_DOWN_LINE_PATTERN = new RegExp(LINE_PREFIX + String.raw`Stopping the server$`);
 const SERVER_UP_LINE_PATTERN = new RegExp(LINE_PREFIX + String.raw`Done \([0-9.]+s\)! For help, type "help"`);
+// Hoisted (was recompiled on every single death line) -- strips the line's own leading timestamp/thread prefix.
+const LINE_PREFIX_PATTERN = new RegExp(LINE_PREFIX);
 
 /** Tries every non-chat event pattern against a raw console line, in order. Returns null for chat or unrelated lines. */
 export function parseServerEvent(line: string): ServerEvent | null {
@@ -107,7 +109,7 @@ export function parseServerEvent(line: string): ServerEvent | null {
   match = DEATH_LINE_PATTERN.exec(line);
   // Strip exactly the real leading "[HH:MM:SS] [Server thread/INFO]: " prefix (non-greedy, anchored) so the
   // detail is the death sentence only — never over-stripping past an embedded prefix in a player-named item.
-  if (match) return { kind: 'death', username: match[1], detail: line.replace(new RegExp(LINE_PREFIX), '') };
+  if (match) return { kind: 'death', username: match[1], detail: line.replace(LINE_PREFIX_PATTERN, '') };
 
   return null;
 }
@@ -145,6 +147,12 @@ export function parseChatLine(line: string): ChatMessage | null {
 const RECONNECT_DELAY_MS = 5000;
 const MAX_RECONNECT_DELAY_MS = 60000;
 
+// A dropped-without-a-FIN connection (power loss on the other end, a NAT/proxy silently expiring an idle
+// socket — Cloudflare/nginx in front of mine.lomokwa.com commonly do this around 60-100s of silence) never
+// fires 'close' or 'error' on its own: the socket just sits there looking OPEN forever, so the bot goes deaf
+// with no sign anything is wrong (audit finding B1). A ping/pong heartbeat detects that and forces the issue.
+const HEARTBEAT_INTERVAL_MS = 30_000;
+
 let reconnectAttempt = 0;
 let currentSocket: WebSocket | null = null;
 let stopped = false;
@@ -166,6 +174,21 @@ async function connect(onChatMessage: ChatMessageHandler, onServerEvent?: Server
   currentSocket = socket;
 
   let connectedAt = Date.now();
+  let alive = true;
+
+  const heartbeat = setInterval(() => {
+    if (!alive) {
+      console.warn('mc-manager: console stream missed a heartbeat pong -- terminating (will reconnect)');
+      socket.terminate(); // the 'close' handler below schedules the reconnect
+      return;
+    }
+    alive = false;
+    socket.ping();
+  }, HEARTBEAT_INTERVAL_MS);
+
+  socket.on('pong', () => {
+    alive = true;
+  });
 
   socket.on('open', () => {
     reconnectAttempt = 0;
@@ -202,6 +225,7 @@ async function connect(onChatMessage: ChatMessageHandler, onServerEvent?: Server
   });
 
   socket.on('close', (code) => {
+    clearInterval(heartbeat);
     console.log(`mc-manager: console stream closed (code ${code}), reconnecting...`);
     scheduleReconnect(onChatMessage, onServerEvent);
   });
