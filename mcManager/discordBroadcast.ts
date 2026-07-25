@@ -68,6 +68,16 @@ export function resolveMentions(content: string, resolveDisplayName: (userId: st
   });
 }
 
+/**
+ * Appends attachment URLs (images, videos, any file) to `content` so a Discord message that's just an
+ * attachment with no text at all still relays something into Minecraft chat, instead of being silently dropped
+ * for having "empty" content. Takes a plain `string[]` of URLs rather than a discord.js Message/Attachment
+ * collection directly, for the same easy-unit-testing reason as resolveMentions above.
+ */
+export function appendAttachmentUrls(content: string, attachmentUrls: string[]): string {
+  return [content, ...attachmentUrls].filter((part) => part.trim().length > 0).join(' ');
+}
+
 // An SNBT string literal: wrap in quotes and escape the two special characters.
 function snbt(s: string): string {
   return `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
