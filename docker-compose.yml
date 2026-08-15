@@ -1,0 +1,17 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - .env
+    volumes:
+      # SQLite settings db (db/database.ts) — survives image rebuilds/restarts.
+      - ./data:/app/data
+    # Bounded json-file logging so container logs (tailed by Promtail) don't
+    # grow the disk unbounded — mirrors the MemoryMax-style guardrail the old
+    # systemd unit had.
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '3'
