@@ -1,0 +1,10 @@
+.env*
+!.env.example
+node_modules
+dist
+data
+.git
+.github
+test
+*.md
+.DS_Store
