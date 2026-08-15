@@ -8,7 +8,8 @@
  * configuration (e.g. whether a given guild has run /setbotchannel).
  */
 import { ActivityType, Client } from 'discord.js';
-import { listPlayers } from './mcManager/players.js';
+import { listPlayers, isMinecraftRunning } from './mcManager/players.js';
+import { McManagerError } from './mcManager/client.js';
 
 const ROTATION_INTERVAL_MS = 30_000;
 const FACT_INTERVAL_MS = 60 * 60 * 1000;
@@ -39,17 +40,60 @@ function randomFact(): string {
   return SELTON_MELLO_FACTS[Math.floor(Math.random() * SELTON_MELLO_FACTS.length)];
 }
 
+/**
+ * What the status line is actually reporting. These are three different facts
+ * that the old code collapsed into two, and got both wrong at the edges: it
+ * asked only "did the player list come back?", so a STOPPED Minecraft server
+ * still read as "🟢 Servidor online" (the panel answered, after all), and any
+ * failure at all — a panel restart, one bad token, a Cloudflare hiccup — read
+ * as the same opaque "indisponível" with no way to tell which.
+ */
+export type ServerSnapshot =
+  | { kind: 'players'; online: number }
+  | { kind: 'stopped' }
+  | { kind: 'forbidden' }
+  | { kind: 'unreachable' };
+
+/** Renders a snapshot as status text. Pure, so the wording is testable without touching the network. */
+export function buildStatusTextFrom(snapshot: ServerSnapshot): string {
+  switch (snapshot.kind) {
+    case 'players':
+      if (snapshot.online === 0) return '🟢 Servidor online — ninguém jogando agora';
+      return `🎮 ${snapshot.online} jogador${snapshot.online === 1 ? '' : 'es'} online`;
+    case 'stopped':
+      return '🟡 Servidor de Minecraft parado';
+    case 'forbidden':
+      return '🔴 Bot sem permissão no painel';
+    case 'unreachable':
+      return '🔴 Painel fora do ar';
+  }
+}
+
+/** Reads live server state. Asks whether the SERVER is up first, then who's on it. */
+export async function readSnapshot(): Promise<ServerSnapshot> {
+  try {
+    if (!(await isMinecraftRunning())) return { kind: 'stopped' };
+    const players = await listPlayers();
+    return { kind: 'players', online: players.filter((player) => player.online).length };
+  } catch (error) {
+    // A 403 is the panel working correctly and refusing US -- the bot's own
+    // account has no role, or one without the permission this route needs.
+    // It cost a real outage to work that out from a status line that just
+    // said "indisponível", so it gets its own wording now.
+    if (error instanceof McManagerError && error.status === 403) {
+      console.error('presence: mc-manager refused the bot (403) -- its account needs a role:', error);
+      return { kind: 'forbidden' };
+    }
+    // Logged in full: the status line has room for four words, and when this
+    // fires the actual HTTP status is the only thing worth knowing.
+    console.error('presence: could not read server state:', error);
+    return { kind: 'unreachable' };
+  }
+}
+
 /** Builds the normal (non-fact) rotation text from live server state. Exported for testing. */
 export async function buildStatusText(): Promise<string> {
-  try {
-    const players = await listPlayers();
-    const online = players.filter((player) => player.online);
-    if (online.length === 0) return '🟢 Servidor online — ninguém jogando agora';
-    return `🎮 ${online.length} jogador${online.length === 1 ? '' : 'es'} online`;
-  } catch (error) {
-    console.error('presence: failed to fetch player list:', error);
-    return '🔴 Servidor indisponível no momento';
-  }
+  return buildStatusTextFrom(await readSnapshot());
 }
 
 let rotationTimer: ReturnType<typeof setInterval> | null = null;
