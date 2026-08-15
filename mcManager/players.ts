@@ -80,3 +80,17 @@ export function buildOnlineMessage(players: Player[]): string {
     .join(', ');
   return `**${online.length}** jogador${online.length === 1 ? '' : 'es'} online: ${names}`;
 }
+
+/** Builds the "/serverinfo" reply text from a player list — pure, so it's testable without mocking the API call. */
+export function buildServerInfoMessage(players: Player[]): string {
+  const whitelistedCount = players.filter((player) => player.is_whitelisted).length;
+  const opCount = players.filter((player) => player.is_op).length;
+  const bannedCount = players.filter((player) => player.is_banned).length;
+
+  return [
+    '🟢 Servidor online',
+    buildOnlineMessage(players),
+    `📋 **${players.length}** jogador${players.length === 1 ? '' : 'es'} conhecido${players.length === 1 ? '' : 's'} — ` +
+      `${whitelistedCount} na whitelist, ${opCount} op${opCount === 1 ? '' : 's'}, ${bannedCount} banido${bannedCount === 1 ? '' : 's'}`,
+  ].join('\n');
+}
