@@ -1,0 +1,3 @@
+# Default owner for all files — automatically requested as a reviewer on
+# every PR unless a more specific rule below overrides it.
+* @lomokwa
