@@ -78,6 +78,54 @@ export function invalidateToken(): void {
   cachedTokenExpiresAt = 0;
 }
 
+/** An mc-manager call that came back wrong, carrying the HTTP status so callers can tell
+ *  "the panel is down" apart from "the panel answered and said no". */
+export class McManagerError extends Error {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+    this.name = 'McManagerError';
+  }
+}
+
+interface ApiResponse<T> {
+  success: boolean;
+  data?: T;
+  error?: string;
+}
+
+/**
+ * GETs an authenticated mc-manager endpoint and unwraps its {success, data}
+ * envelope. Every authed read should go through here rather than calling fetch
+ * directly, for two reasons that both cost us real outages before:
+ *
+ * - The status is checked BEFORE the body is parsed. The API sits behind
+ *   Cloudflare, which answers 502/504 with an HTML page; response.json() on
+ *   that throws "Unexpected token '<'", hiding the status the caller needs.
+ * - A 401 invalidates the cached token. getToken() caches for ~23h, so a token
+ *   the server rejects once would otherwise keep being reused for the rest of
+ *   the day — the bot stays broken long after the server is healthy again.
+ */
+export async function apiGet<T>(path: string): Promise<T> {
+  const token = await getToken();
+  const response = await fetch(`${apiUrl}${path}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+
+  if (!response.ok) {
+    if (response.status === 401) invalidateToken();
+    throw new McManagerError(`mc-manager: ${path} returned HTTP ${response.status}`, response.status);
+  }
+
+  const body = (await response.json()) as ApiResponse<T>;
+  if (!body.success || body.data === undefined) {
+    throw new McManagerError(`mc-manager: ${path} failed: ${body.error ?? response.statusText}`, response.status);
+  }
+  return body.data;
+}
+
 export function getApiUrl(): string {
   return apiUrl!;
 }

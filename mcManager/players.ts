@@ -5,7 +5,7 @@
  * (see mc-manager-server's services/minecraft.go ListPlayers) — so op status
  * can be checked without needing a new endpoint or any console-command trick.
  */
-import { getApiUrl, getToken } from './client.js';
+import { apiGet } from './client.js';
 
 export interface Player {
   uuid: string;
@@ -14,12 +14,6 @@ export interface Player {
   is_op: boolean;
   is_banned: boolean;
   is_whitelisted: boolean;
-}
-
-interface PlayersResponse {
-  success: boolean;
-  data?: Player[];
-  error?: string;
 }
 
 // Every caller of listPlayers() (the presence rotation every 30s, "!online", "/mc"'s op check, "!whitelist"'s
@@ -41,19 +35,17 @@ export async function listPlayers(): Promise<Player[]> {
     return cachedPlayers;
   }
 
-  const token = await getToken();
-  const response = await fetch(`${getApiUrl()}/api/players`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  const body = (await response.json()) as PlayersResponse;
-  if (!response.ok || !body.success || !body.data) {
-    throw new Error(`mc-manager: failed to list players: ${body.error ?? response.statusText}`);
-  }
-
-  cachedPlayers = body.data;
+  const players = await apiGet<Player[]>('/api/players');
+  cachedPlayers = players;
   cachedAt = now;
-  return body.data;
+  return players;
+}
+
+/** True when the Minecraft server itself is up — which is a different question from
+ *  "is the panel reachable", and the one the status line actually wants to answer. */
+export async function isMinecraftRunning(): Promise<boolean> {
+  const status = await apiGet<{ running: boolean }>('/api/status');
+  return status.running;
 }
 
 /**
