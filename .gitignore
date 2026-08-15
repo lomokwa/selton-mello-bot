@@ -5,3 +5,4 @@ node_modules
 dist
 data/
 "D:\dev\projects\selton-mello-bot\statusMessageId.json"
+.DS_Store
