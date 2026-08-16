@@ -6,6 +6,7 @@ import { startConsoleStream, ChatMessage, ServerEvent, sendCommand } from './mcM
 import { broadcastDiscordMessageToMinecraft, buildReplySnippet, resolveMentions, appendAttachmentUrls, ReplyContext } from './mcManager/discordBroadcast.js';
 import { requestLinkFromMinecraft, isValidMinecraftUsername } from './mcManager/accountLinking.js';
 import { sanitizeMessageContent, sanitizeWebhookUsername, getPlayerHeadUrl } from './sanitize.js';
+import { pickReusableWebhook, classifyWebhookError, describeWebhookFailure } from './webhookPick.js';
 import { isPlayerOp, buildOnlineMessage, listPlayers } from './mcManager/players.js';
 import { getLinkedMinecraftUsername } from './db/accountLinks.js';
 import { parseWhitelistCommand } from './whitelistCommand.js';
@@ -231,23 +232,38 @@ async function getOrCreateChatWebhook(channel: unknown): Promise<Webhook | null>
 
   try {
     const existingWebhooks = await webhookChannel.fetchWebhooks();
-    const existing = existingWebhooks.find(
-      (webhook) => webhook.name === WEBHOOK_NAME && webhook.owner?.id === bot.user?.id,
-    );
+    const existing = pickReusableWebhook([...existingWebhooks.values()], WEBHOOK_NAME, bot.user?.id);
 
-    const webhook =
-      existing ??
-      (await webhookChannel.createWebhook({
-        name: WEBHOOK_NAME,
-        reason: 'Used to relay Minecraft chat messages with per-player avatars',
-      }));
+    let webhook = existing;
+    if (!webhook) {
+      try {
+        webhook = await webhookChannel.createWebhook({
+          name: WEBHOOK_NAME,
+          reason: 'Used to relay Minecraft chat messages with per-player avatars',
+        });
+      } catch (createError) {
+        // Hitting the 15-per-channel cap is recoverable if ANY usable webhook
+        // is already there -- reuse beats going mute. Only give up when the
+        // channel is genuinely full of webhooks we can't send through.
+        if (classifyWebhookError(createError) !== 'limit') throw createError;
+        const anyUsable = [...existingWebhooks.values()].find((w) => !!w.token);
+        if (!anyUsable) throw createError;
+        console.warn(
+          `Channel ${channelId} is at Discord's webhook limit; reusing the existing "${anyUsable.name}" webhook instead of creating another.`,
+        );
+        webhook = anyUsable;
+      }
+    }
 
     chatWebhooks.set(channelId, webhook);
     webhookRetryAfter.delete(channelId);
     return webhook;
   } catch (error) {
+    // Naming the real cause matters: this used to blame "Manage Webhooks" for
+    // every failure, so a channel that had simply run out of webhook slots sent
+    // whoever read the log looking at permissions instead.
     console.error(
-      `Missing "Manage Webhooks" permission in channel ${channelId} — falling back to plain messages for ${Math.round(WEBHOOK_RETRY_COOLDOWN_MS / 60000)} min:`,
+      describeWebhookFailure(classifyWebhookError(error), channelId, Math.round(WEBHOOK_RETRY_COOLDOWN_MS / 60000)),
       error instanceof Error ? error.message : error,
     );
     webhookRetryAfter.set(channelId, Date.now() + WEBHOOK_RETRY_COOLDOWN_MS);
